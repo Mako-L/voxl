@@ -95,7 +95,10 @@ export function createViewport(
 		liftParam !== null && Number.isFinite(Number(liftParam))
 			? Math.max(0, Number(liftParam))
 			: touchDevice && !apple
-				? 36
+				? // Measured on a Galaxy Z Fold: 16 on the big inner screen, 36 on the cover.
+					Math.min(screen.width, screen.height) >= 600
+					? 16
+					: 36
 				: 0;
 
 	function area() {
