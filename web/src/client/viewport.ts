@@ -24,6 +24,11 @@ export interface Viewport {
 	/** Zoom around the middle of the visible area. */
 	zoomBy(factor: number): void;
 	resetZoom(): void;
+	/** Fill: cover the whole window (edges may be cut off) instead of fitting inside it. */
+	setFill(on: boolean): void;
+	fill(): boolean;
+	/** Whether the desktop is bigger than the visible area (so it can be panned). */
+	canPan(): boolean;
 	/** Pan by CSS px; returns what couldn't be panned (the view hit an edge). */
 	panBy(dx: number, dy: number): [number, number];
 	/** The viewer clicked or tapped here (desktop px): where they will be typing. */
@@ -49,6 +54,8 @@ export function createViewport(
 	// Surface's top left relative to the visible area's, in CSS px.
 	let pan = { x: 0, y: 0 };
 	let barH = 0;
+	let fill = false;
+	let big = false;
 	// Visible height without the keyboard (the layout viewport's).
 	let fullH = vv ? vv.height : window.innerHeight;
 	let lastW = vv ? vv.width : window.innerWidth;
@@ -125,7 +132,9 @@ export function createViewport(
 		if (!dw) return;
 		// Fit into the area without the keyboard, so it popping up doesn't shrink the desktop.
 		const fitH = kbOpen ? Math.max(a.h, fullH) : a.h;
-		const fit = Math.min(a.w / dw, fitH / dh) || 1;
+		const fit =
+			(fill ? Math.max(a.w / dw, fitH / dh) : Math.min(a.w / dw, fitH / dh)) ||
+			1;
 		const dpr = window.devicePixelRatio || 1;
 		// Snap the height so every stripe boundary lands on a whole device pixel;
 		// otherwise the stacked stripe layers show hairline seams.
@@ -148,6 +157,8 @@ export function createViewport(
 		wantFocus = false;
 		pan.x = sw <= a.w ? (a.w - sw) / 2 : Math.min(0, Math.max(a.w - sw, pan.x));
 		pan.y = sh <= a.h ? (a.h - sh) / 2 : Math.min(0, Math.max(a.h - sh, pan.y));
+		big = sw > a.w + 1 || sh > a.h + 1;
+		document.documentElement.classList.toggle('fill', fill);
 		surface.style.width = `${sw}px`;
 		surface.style.height = `${sh}px`;
 		surface.style.left = `${a.x + pan.x}px`;
@@ -229,6 +240,21 @@ export function createViewport(
 			const a = area();
 			zoomAt(factor, a.x + a.w / 2, a.y + a.h / 2);
 		},
+		setFill(on) {
+			if (on === fill) return;
+			fill = on;
+			zoom = 1;
+			// Centred: the parts cut off are shared out evenly.
+			pan = { x: -1e6, y: -1e6 };
+			layout();
+			pan = {
+				x: (area().w - surface.offsetWidth) / 2,
+				y: (area().h - surface.offsetHeight) / 2,
+			};
+			layout();
+		},
+		fill: () => fill,
+		canPan: () => big,
 		resetZoom() {
 			zoom = 1;
 			layout();

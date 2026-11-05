@@ -61,6 +61,7 @@ export function setupDevice(app: App) {
 		sync = localStorage.getItem(SYNC_KEY) !== '0';
 	} catch {}
 	let lastSent: string | null = null;
+	let synced = false;
 
 	const send = (action: string) => app.send(cmd.device(action));
 
@@ -158,8 +159,11 @@ export function setupDevice(app: App) {
 			on = sim && !app.readOnly;
 			app.tools.classList.toggle('sim', on);
 			if (!on) panel.classList.remove('open');
-			lastSent = null;
-			follow();
+			// Once per page: a stream restart (a new hello) is no reason to re-send it.
+			if (on && !synced) {
+				synced = true;
+				follow();
+			}
 		},
 	};
 }

@@ -93,6 +93,11 @@ public class MainActivity extends Activity {
         s.setUserAgentString(s.getUserAgentString() + " VoxlApp/0.1");
         web.setWebViewClient(new WebViewClient());
         web.setWebChromeClient(new WebChromeClient());
+        // Edge to edge, under the camera cutout too: the stream fills the whole panel.
+        android.view.WindowManager.LayoutParams lp = getWindow().getAttributes();
+        lp.layoutInDisplayCutoutMode =
+                android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS;
+        getWindow().setAttributes(lp);
         setContentView(web);
         immersive();
         sensors = getSystemService(SensorManager.class);

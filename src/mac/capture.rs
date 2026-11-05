@@ -27,6 +27,96 @@ static STARTED: AtomicBool = AtomicBool::new(false);
 /// (x0, y0, x1, y1) in frame pixels.
 type PixelRect = (usize, usize, usize, usize);
 
+/// The screen inside a device drawn by Device Hub (`x0..x1, y0..y1` its outline in
+/// frame pixels): past the frame and the pure black ring of the bezel, and trimmed by
+/// the rounded corners, so what's left is all screen, edge to edge. Each edge is
+/// measured along several lines and the median taken, so dark content touching the
+/// bezel on a few of them doesn't matter.
+fn screen_inside(
+    at: &dyn Fn(usize, usize) -> i32,
+    x0: usize,
+    y0: usize,
+    x1: usize,
+    y1: usize,
+) -> PixelRect {
+    // Video-range luma: black is 16.
+    const BLACK: i32 = 20;
+    let (w, h) = (x1 - x0, y1 - y0);
+    // Walking from `start` by `step` (pixels as a function of the step count): the
+    // number of steps until the screen starts, or None when the black run looks like
+    // dark content rather than bezel.
+    let inset = |px: &dyn Fn(usize) -> i32, max: usize| -> Option<usize> {
+        let mut i = 0;
+        while i < max && px(i) > BLACK {
+            i += 1; // the frame
+        }
+        let ring = i;
+        while i < max && px(i) <= BLACK {
+            i += 1; // the black ring
+        }
+        (i > ring && i < max).then_some(i)
+    };
+    let median = |mut v: Vec<usize>| -> Option<usize> {
+        v.sort_unstable();
+        (!v.is_empty()).then(|| v[v.len() / 2])
+    };
+    let lines = |n: usize| (2..=8).map(move |k| n * k / 10);
+    let (mw, mh) = (w / 8, h / 8);
+    let l = median(
+        lines(h)
+            .filter_map(|r| inset(&|i| at(x0 + i, y0 + r), mw))
+            .collect(),
+    );
+    let rr = median(
+        lines(h)
+            .filter_map(|r| inset(&|i| at(x1 - 1 - i, y0 + r), mw))
+            .collect(),
+    );
+    let t = median(
+        lines(w)
+            .filter_map(|c| inset(&|i| at(x0 + c, y0 + i), mh))
+            .collect(),
+    );
+    let b = median(
+        lines(w)
+            .filter_map(|c| inset(&|i| at(x0 + c, y1 - 1 - i), mh))
+            .collect(),
+    );
+    let any = [l, rr, t, b].into_iter().flatten().max().unwrap_or(0);
+    let (l, rr, t, b) = (
+        l.unwrap_or(any),
+        rr.unwrap_or(any),
+        t.unwrap_or(any),
+        b.unwrap_or(any),
+    );
+    // Rounded corners: along each diagonal the screen starts further in than along the
+    // edges; trimming that much off every side leaves no corner showing.
+    let m = w.min(h) / 4;
+    let corners: Vec<usize> = [
+        (x0 + l, y0 + t, 1i64, 1i64),
+        (x1 - 1 - rr, y0 + t, -1, 1),
+        (x0 + l, y1 - 1 - b, 1, -1),
+        (x1 - 1 - rr, y1 - 1 - b, -1, -1),
+    ]
+    .into_iter()
+    .filter_map(|(cx, cy, dx, dy)| {
+        // Past the frame and the black of the rounded corner, as along the edges.
+        inset(
+            &|i| at((cx as i64 + dx * i as i64) as usize, (cy as i64 + dy * i as i64) as usize),
+            m,
+        )
+    })
+    .collect();
+    let c = median(corners).unwrap_or(0) + 1;
+    let (a0, b0) = (x0 + l + c, y0 + t + c);
+    let (a1, b1) = (x1 - rr - c, y1 - b - c);
+    if a1 > a0 + 40 && b1 > b0 + 40 {
+        (a0 & !1, b0 & !1, a1 & !1, b1 & !1)
+    } else {
+        (x0, y0, x1, y1)
+    }
+}
+
 /// Device Hub (Xcode 27) draws the device centred on a plain background inside its
 /// window, and its accessibility frames for the screen aren't in screen coordinates.
 /// So: capture the whole window once and take the bounding box of whatever differs
@@ -80,9 +170,11 @@ fn detect_device_rect(w: &stream::WindowInfo) -> Option<CGRect> {
                 }
             }
         }
+        let found = (x0 < x1 && y0 < y1)
+            .then(|| screen_inside(&at, x0, y0, (x1 + 2).min(w), (y1 + 2).min(h)));
         CVPixelBufferUnlockBaseAddress(pb, kCVPixelBufferLock_ReadOnly);
-        if x0 < x1 && y0 < y1 {
-            *f2.lock() = Some((x0, y0, (x1 + 2).min(w), (y1 + 2).min(h)));
+        if let Some(r) = found {
+            *f2.lock() = Some(r);
         }
     };
     let fps = 30;
@@ -127,7 +219,7 @@ fn detect_device_rect(w: &stream::WindowInfo) -> Option<CGRect> {
         },
     };
     log::info!(
-        "device found in Device Hub's window at {:.0},{:.0} {:.0}x{:.0} points",
+        "device screen found in Device Hub's window at {:.0},{:.0} {:.0}x{:.0} points",
         r.origin.x - w.frame.origin.x,
         r.origin.y - w.frame.origin.y,
         r.size.width,
@@ -232,6 +324,9 @@ pub struct Capturer {
     /// With --app: the window's frame (global points); `geometry.bounds` is the part
     /// of it that is streamed.
     win_frame: CGRect,
+    /// Device Hub: the window (for finding the device again) and the answer.
+    win_info: Option<stream::WindowInfo>,
+    recrop: Arc<Mutex<Option<Option<CGRect>>>>,
 }
 
 /// Number from a CFNumber value of a frame-info dictionary.
@@ -245,6 +340,7 @@ unsafe fn dict_i64(dict: CFDictionaryRef, key: *const c_void) -> Option<i64> {
 impl Capturer {
     pub fn new(_display: Option<&str>) -> Result<Self, String> {
         let display = super::display();
+        let mut hub_info = None;
         let (source, geometry, window) = match super::app_target() {
             Some(t) => {
                 let mut w = wait_for_window(&t)?;
@@ -266,6 +362,7 @@ impl Capturer {
                 };
                 // Have the app in front from the start, so the first tap lands in it.
                 super::raise_app(w.pid);
+                hub_info = (hub && t.screen_only).then(|| w.clone());
                 (Source::Window(w.id), g, Some((w.id, w.frame)))
             }
             None => {
@@ -416,6 +513,8 @@ impl Capturer {
             rebuild: false,
             window,
             win_frame,
+            win_info: hub_info,
+            recrop: Arc::new(Mutex::new(None)),
         };
         // The stream opens with a full frame; have it before anything is converted.
         let t = Instant::now();
@@ -468,9 +567,28 @@ impl Capturer {
             self.damaged = true;
             self.damaged_at.get_or_insert_with(Instant::now);
         }
-        if self.window.is_some() && super::sim::take_recrop() {
-            log::info!("device changed shape; finding it again");
-            self.rebuild = true;
+        // After a fold or rotation, look for the device again (off this thread) and
+        // restart only if its outline really moved.
+        if super::sim::take_recrop() {
+            if let Some(w) = self.win_info.clone() {
+                let slot = self.recrop.clone();
+                std::thread::spawn(move || {
+                    *slot.lock() = Some(detect_device_rect(&w));
+                });
+            }
+        }
+        if let Some(found) = self.recrop.lock().take() {
+            let b = self.geometry.bounds;
+            let moved = found.is_some_and(|r| {
+                (r.origin.x - b.origin.x).abs() > 2.0
+                    || (r.origin.y - b.origin.y).abs() > 2.0
+                    || (r.size.width - b.size.width).abs() > 2.0
+                    || (r.size.height - b.size.height).abs() > 2.0
+            });
+            if moved {
+                log::info!("device changed shape; restarting capture");
+                self.rebuild = true;
+            }
         }
         if let Some(id) = self.window {
             // The window moves (input has to follow it), resizes or closes.

@@ -15,6 +15,17 @@ interface WebkitElement {
 	webkitRequestFullscreen?: () => void;
 }
 
+/** Fill by default on a phone or tablet streaming a simulated phone, unless the viewer
+ * chose otherwise before. */
+export function defaultFill(viewport: Viewport, sim: boolean) {
+	let saved: string | null = null;
+	try {
+		saved = localStorage.getItem('voxl.fill');
+	} catch {}
+	const touch = matchMedia('(pointer: coarse)').matches;
+	viewport.setFill(saved !== null ? saved === '1' : touch && sim);
+}
+
 export function setupToolbar(app: App, viewport: Viewport) {
 	const { tools, kbd } = app;
 	const kbBtn = el<HTMLButtonElement>('kb-btn');
@@ -22,6 +33,7 @@ export function setupToolbar(app: App, viewport: Viewport) {
 	const zoomIn = el<HTMLButtonElement>('zoom-in');
 	const zoomOut = el<HTMLButtonElement>('zoom-out');
 	const zoomReset = el<HTMLButtonElement>('zoom-reset');
+	const fillBtn = el<HTMLButtonElement>('fill-btn');
 	const hint = el('hint');
 	let hideTimer: ReturnType<typeof setTimeout> | undefined;
 	function show(ms: number) {
@@ -63,10 +75,21 @@ export function setupToolbar(app: App, viewport: Viewport) {
 	zoomIn.addEventListener('click', () => viewport.zoomBy(ZOOM_STEP));
 	zoomOut.addEventListener('click', () => viewport.zoomBy(1 / ZOOM_STEP));
 	zoomReset.addEventListener('click', () => viewport.resetZoom());
+	const FILL_KEY = 'voxl.fill';
+	fillBtn.addEventListener('click', () => {
+		viewport.setFill(!viewport.fill());
+		try {
+			localStorage.setItem(FILL_KEY, viewport.fill() ? '1' : '0');
+		} catch {}
+	});
 	viewport.onChange(() => {
 		const z = viewport.zoom();
 		zoomReset.title = `Fit to window (${Math.round(z * 100)}%)`;
 		zoomOut.disabled = z <= 1.001;
+		fillBtn.classList.toggle('on', viewport.fill());
+		fillBtn.title = viewport.fill()
+			? 'Fit the whole screen in view'
+			: 'Fill the screen edge to edge';
 	});
 
 	let hintTimer: ReturnType<typeof setTimeout> | undefined;

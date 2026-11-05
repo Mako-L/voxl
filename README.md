@@ -343,6 +343,13 @@ viewer's hinge: shut, half open and flat press its Closed, Partially Open and Op
 buttons. On any other iPhone, shutting the viewer's phone locks it and opening wakes
 it.
 
+The stream is cropped to the device's screen itself: past its frame and bezel and
+trimmed by its rounded corners, so nothing but screen reaches the viewer. On a phone
+the page then **fills** the screen edge to edge (the Fill button toggles back to
+fitting it whole). When the two screens' shapes differ (the unfolded Duo is much
+wider than an unfolded Galaxy Fold), filling cuts off the sides; drag with two
+fingers to see them.
+
 #### Android app (`android/`)
 
 The same page full screen, with the phone itself as the controller: its **volume

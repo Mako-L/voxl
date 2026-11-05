@@ -62,7 +62,7 @@ export function setupPointer(
 		deskPerPx,
 		zoomAt: viewport.zoomAt,
 		panBy: viewport.panBy,
-		zoomed: () => viewport.zoom() > 1.001,
+		zoomed: () => viewport.canPan(),
 	});
 	// The page itself never scrolls or zooms under the fingers, and taps on the desktop
 	// don't move focus off the keyboard's textarea (which would close the keyboard).

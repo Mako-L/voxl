@@ -14,7 +14,7 @@ import { setupKeyboard } from './keyboard';
 import { createMic } from './mic';
 import { setupPointer } from './pointer';
 import { createResize } from './resize';
-import { setupToolbar } from './toolbar';
+import { defaultFill, setupToolbar } from './toolbar';
 import { createVideo } from './video';
 import { createViewport } from './viewport';
 
@@ -148,6 +148,7 @@ function main() {
 				viewport.layout();
 				extraKeys.refresh();
 				device.setup(!!m.sim);
+				defaultFill(viewport, !!m.sim);
 				files.setup(m.files);
 				mic.setup(!!m.mic && !app.readOnly);
 				resize.setup(m.resize);

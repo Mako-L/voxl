@@ -345,6 +345,9 @@ fn hub_action(action: &str) -> Option<HubAction> {
     })
 }
 
+/// The last fold state and orientation pressed in Device Hub.
+static LAST_STATE: std::sync::Mutex<[Option<String>; 2]> = std::sync::Mutex::new([None, None]);
+
 /// A non-foldable iPhone mirrors a foldable viewer's hinge with its side button:
 /// folding shut locks it, opening it again wakes it.
 static LOCKED_BY_FOLD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -370,6 +373,20 @@ pub fn device_action(action: &str) {
             log::info!("device action {action:?} isn't available in Device Hub");
             return;
         };
+        // Orientation and fold are states: pressing one the device is already in
+        // would only restart the stream (and two viewers would ping-pong it).
+        if matches!(
+            action,
+            "portrait" | "upside-down" | "landscape-left" | "landscape-right"
+        ) || action.starts_with("fold-")
+        {
+            let mut last = LAST_STATE.lock().unwrap();
+            let key = if action.starts_with("fold-") { 0 } else { 1 };
+            if last[key].as_deref() == Some(action) {
+                return;
+            }
+            last[key] = Some(action.to_string());
+        }
         let reshapes = action.starts_with("fold-")
             || action.starts_with("rot")
             || matches!(
@@ -388,6 +405,9 @@ pub fn device_action(action: &str) {
                     press_menu(pid, p)
                 }
             };
+            if action.starts_with("rot") {
+                LAST_STATE.lock().unwrap()[1] = None;
+            }
             match r {
                 // The device changes shape; find it again once the animation settles.
                 Ok(()) if reshapes => recrop_after(1300),

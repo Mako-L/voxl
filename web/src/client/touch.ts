@@ -25,6 +25,7 @@ interface Hooks {
 	zoomAt(factor: number, cx: number, cy: number): void;
 	/** Pan the view; returns what it couldn't pan. */
 	panBy(dx: number, dy: number): [number, number];
+	/** The view is bigger than the window (zoomed in, or filling it): pannable. */
 	zoomed(): boolean;
 }
 
