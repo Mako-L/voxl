@@ -82,11 +82,19 @@ export function createViewport(
 	// Some Android keyboards (Samsung Keyboard's toolbar strip) draw above the top
 	// they report, covering the bottom of the page. Keep this much (CSS px) clear above
 	// an open keyboard; ?kblift=N overrides it.
+	// Not "Android" in the user agent: on a tablet or a Fold's inner screen browsers ask
+	// for desktop sites and claim to be Linux. Any touch device but an iPhone or iPad
+	// (whose keyboards report their top correctly) gets the lift.
 	const liftParam = new URLSearchParams(location.search).get('kblift');
+	const ua = navigator.userAgent;
+	const apple =
+		/iPhone|iPad|iPod/.test(ua) ||
+		(/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+	const touchDevice = matchMedia('(pointer: coarse)').matches;
 	const kbLift =
 		liftParam !== null && Number.isFinite(Number(liftParam))
 			? Math.max(0, Number(liftParam))
-			: /Android/i.test(navigator.userAgent)
+			: touchDevice && !apple
 				? 36
 				: 0;
 
