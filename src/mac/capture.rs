@@ -27,13 +27,14 @@ static STARTED: AtomicBool = AtomicBool::new(false);
 /// (x0, y0, x1, y1) in frame pixels.
 type PixelRect = (usize, usize, usize, usize);
 
+/// How often to look at Device Hub's window again for the device.
+const RECHECK_EVERY: Duration = Duration::from_secs(2);
+
 /// The screen inside a device drawn by Device Hub (`x0..x1, y0..y1` its outline in
 /// frame pixels): past the frame and the pure black ring of the bezel, and trimmed by
 /// the rounded corners, so what's left is all screen, edge to edge. Each edge is
-/// measured along several lines and the median taken, so dark content touching the
-/// bezel on a few of them doesn't matter.
-/// How often to look at Device Hub's window again for the device.
-const RECHECK_EVERY: Duration = Duration::from_secs(2);
+/// measured along several lines and the smallest taken, so dark content touching the
+/// bezel (which makes the ring look deeper) doesn't cut into the screen.
 
 fn screen_inside(
     at: &dyn Fn(usize, usize) -> i32,
@@ -45,46 +46,45 @@ fn screen_inside(
     // Video-range luma: black is 16.
     const BLACK: i32 = 20;
     let (w, h) = (x1 - x0, y1 - y0);
-    // Walking from `start` by `step` (pixels as a function of the step count): the
-    // number of steps until the screen starts, or None when the black run looks like
-    // dark content rather than bezel.
-    let inset = |px: &dyn Fn(usize) -> i32, max: usize| -> Option<usize> {
+    // Walking from an edge inwards (pixels as a function of the step count): how many
+    // steps of frame (anything not black), then of black, before the screen starts.
+    // None when it never gets past the black (or the frame) within `max`.
+    let run = |px: &dyn Fn(usize) -> i32, max: usize| -> Option<(usize, usize)> {
         let mut i = 0;
         while i < max && px(i) > BLACK {
             i += 1; // the frame
         }
-        let ring = i;
+        let frame = i;
         while i < max && px(i) <= BLACK {
             i += 1; // the black ring
         }
-        (i > ring && i < max).then_some(i)
+        (i > frame && i < max).then_some((frame, i - frame))
     };
-    let median = |mut v: Vec<usize>| -> Option<usize> {
-        v.sort_unstable();
-        (!v.is_empty()).then(|| v[v.len() / 2])
-    };
+    // The corner walk below wants frame and ring together.
+    let inset = |px: &dyn Fn(usize) -> i32, max: usize| run(px, max).map(|(f, r)| f + r);
     let lines = |n: usize| (2..=8).map(move |k| n * k / 10);
     let (mw, mh) = (w / 8, h / 8);
-    let l = median(
+    let edges: [Vec<(usize, usize)>; 4] = [
         lines(h)
-            .filter_map(|r| inset(&|i| at(x0 + i, y0 + r), mw))
+            .filter_map(|r| run(&|i| at(x0 + i, y0 + r), mw))
             .collect(),
-    );
-    let rr = median(
         lines(h)
-            .filter_map(|r| inset(&|i| at(x1 - 1 - i, y0 + r), mw))
+            .filter_map(|r| run(&|i| at(x1 - 1 - i, y0 + r), mw))
             .collect(),
-    );
-    let t = median(
         lines(w)
-            .filter_map(|c| inset(&|i| at(x0 + c, y0 + i), mh))
+            .filter_map(|c| run(&|i| at(x0 + c, y0 + i), mh))
             .collect(),
-    );
-    let b = median(
         lines(w)
-            .filter_map(|c| inset(&|i| at(x0 + c, y1 - 1 - i), mh))
+            .filter_map(|c| run(&|i| at(x0 + c, y1 - 1 - i), mh))
             .collect(),
-    );
+    ];
+    // The black ring is as wide all the way round, but dark app content next to it
+    // makes it look wider (the black seems to go on): the narrowest seen on any edge is
+    // the real one. The frame isn't black, so content can't touch it; its narrowest
+    // line per edge skips the buttons sticking out of it.
+    let ring = edges.iter().flatten().map(|&(_, r)| r).min();
+    let side = |e: &Vec<(usize, usize)>| e.iter().map(|&(f, _)| f).min();
+    let [l, rr, t, b] = [0, 1, 2, 3].map(|k| Some(side(&edges[k])? + ring?));
     let any = [l, rr, t, b].into_iter().flatten().max().unwrap_or(0);
     let (l, rr, t, b) = (
         l.unwrap_or(any),
@@ -115,7 +115,8 @@ fn screen_inside(
         )
     })
     .collect();
-    let c = median(corners).unwrap_or(0) + 1;
+    // The least rounded corner (dark content makes a corner look deeper too).
+    let c = corners.into_iter().min().unwrap_or(0) + 1;
     let (a0, b0) = (x0 + l + c, y0 + t + c);
     let (a1, b1) = (x1 - rr - c, y1 - b - c);
     if a1 > a0 + 40 && b1 > b0 + 40 {
@@ -145,12 +146,18 @@ fn fit_hub(w: &stream::WindowInfo) -> Option<CGRect> {
     const STEP: f64 = 1.3;
     let mut last = None;
     for _ in 0..10 {
-        let f = detect_device_rect(w);
+        // Something tiny is the window mid-redraw, not a device.
+        let f = detect_device_rect(w)
+            .filter(|f| f.screen.size.width >= 100.0 && f.screen.size.height >= 100.0);
         let zoom_in = match f {
             Some(f) if f.room >= STEP => true,
             Some(f) if f.room >= 1.0 => return Some(f.screen),
-            // Too big (cut off, or grown into a side panel): back a step.
-            _ => false,
+            // Cut off: back a step.
+            Some(_) => false,
+            // Lost after zooming in (grown into a side panel): back a step. Lost
+            // otherwise: nothing to go on, leave the zoom alone.
+            None if last == Some(true) => false,
+            None => return None,
         };
         if !zoom_in && last == Some(true) {
             // Just overshot: one step out fits, by the room measured before.
@@ -683,7 +690,11 @@ impl Capturer {
                     || (r.size.height - b.size.height).abs() > tol
             });
             if moved {
-                log::info!("device changed shape; restarting capture");
+                log::info!(
+                    "device changed shape ({:?} -> {:?}); restarting capture",
+                    (b.origin.x, b.origin.y, b.size.width, b.size.height),
+                    found.map(|r| (r.origin.x, r.origin.y, r.size.width, r.size.height))
+                );
                 self.rebuild = true;
             }
         }
