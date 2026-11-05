@@ -61,12 +61,24 @@ export function createViewport(
 	const softKeyboard = () =>
 		document.activeElement === kbd && !!kbd.dataset.soft;
 
+	// Some Android keyboards (Samsung Keyboard's toolbar strip) draw above the top
+	// they report, covering the bottom of the page. Keep this much (CSS px) clear above
+	// an open keyboard; ?kblift=N overrides it.
+	const liftParam = new URLSearchParams(location.search).get('kblift');
+	const kbLift =
+		liftParam !== null && Number.isFinite(Number(liftParam))
+			? Math.max(0, Number(liftParam))
+			: /Android/i.test(navigator.userAgent)
+				? 18
+				: 0;
+
 	function area() {
+		const lift = kbOpen ? kbLift : 0;
 		return {
 			x: vv ? vv.offsetLeft : 0,
 			y: vv ? vv.offsetTop : 0,
 			w: vv ? vv.width : window.innerWidth,
-			h: Math.max(1, (vv ? vv.height : window.innerHeight) - barH),
+			h: Math.max(1, (vv ? vv.height : window.innerHeight) - barH - lift),
 		};
 	}
 
