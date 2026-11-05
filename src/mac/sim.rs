@@ -159,9 +159,12 @@ pub fn screen_rect(pid: i32, window: &CGRect) -> Option<CGRect> {
 /// Presses the first button titled `title` in any of the app's windows.
 fn press_button(pid: i32, title: &str) -> Result<(), String> {
     fn find(e: AXUIElementRef, title: &str, depth: u32) -> Option<(Vec<Cf>, AXUIElementRef)> {
-        if string_attr(e, "AXRole").as_deref() == Some("AXButton")
-            && (string_attr(e, "AXTitle").as_deref() == Some(title)
-                || string_attr(e, "AXDescription").as_deref() == Some(title))
+        // Toolbar segments (Zoom In, Zoom Out) are radio buttons.
+        if matches!(
+            string_attr(e, "AXRole").as_deref(),
+            Some("AXButton" | "AXRadioButton")
+        ) && (string_attr(e, "AXTitle").as_deref() == Some(title)
+            || string_attr(e, "AXDescription").as_deref() == Some(title))
         {
             return Some((Vec::new(), e));
         }
@@ -211,7 +214,7 @@ fn set_frame(e: AXUIElementRef, r: &CGRect) -> bool {
 }
 
 /// Lays Device Hub out to stream its device well: the main window (the compact one
-/// can't zoom) without the sidebar, zoomed to fit, and large on its display, so the
+/// can't zoom) without the sidebar, and large on its display, so the
 /// device is drawn with as many pixels as possible. Returns whether anything changed
 /// (the window then has to be found again).
 pub fn prepare_hub(pid: i32, window: &CGRect) -> bool {
@@ -222,7 +225,6 @@ pub fn prepare_hub(pid: i32, window: &CGRect) -> bool {
     if press_menu(pid, &["View", "Hide Sidebar"]).is_ok() {
         changed = true;
     }
-    let _ = press_menu(pid, &["View", "Zoom to Fit"]);
     // Fill most of the display the window is on (it's captured even when covered).
     let d = super::display_of(window).unwrap_or_else(super::display);
     let b = unsafe { CGDisplayBounds(d) };
@@ -257,12 +259,26 @@ pub fn prepare_hub(pid: i32, window: &CGRect) -> bool {
             }
         }
     }
+    // The zoom is left alone: capture zooms the canvas so the device fits (fit_hub).
     if changed {
         std::thread::sleep(std::time::Duration::from_millis(800));
-        let _ = press_menu(pid, &["View", "Zoom to Fit"]);
-        std::thread::sleep(std::time::Duration::from_millis(500));
     }
     changed
+}
+
+/// Zooms Device Hub's canvas one step in or out (about 1.25x).
+pub fn hub_zoom(pid: i32, zoom_in: bool) -> bool {
+    let title = if zoom_in { "Zoom In" } else { "Zoom Out" };
+    match press_button(pid, title) {
+        Ok(()) => {
+            log::info!("device action: {title}");
+            true
+        }
+        Err(e) => {
+            log::debug!("{e}");
+            false
+        }
+    }
 }
 
 /// Presses the menu item at `path` (menu bar title, then item titles) in the app.

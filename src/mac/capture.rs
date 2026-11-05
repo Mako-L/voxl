@@ -32,6 +32,9 @@ type PixelRect = (usize, usize, usize, usize);
 /// the rounded corners, so what's left is all screen, edge to edge. Each edge is
 /// measured along several lines and the median taken, so dark content touching the
 /// bezel on a few of them doesn't matter.
+/// How often to look at Device Hub's window again for the device.
+const RECHECK_EVERY: Duration = Duration::from_secs(2);
+
 fn screen_inside(
     at: &dyn Fn(usize, usize) -> i32,
     x0: usize,
@@ -102,7 +105,12 @@ fn screen_inside(
     .filter_map(|(cx, cy, dx, dy)| {
         // Past the frame and the black of the rounded corner, as along the edges.
         inset(
-            &|i| at((cx as i64 + dx * i as i64) as usize, (cy as i64 + dy * i as i64) as usize),
+            &|i| {
+                at(
+                    (cx as i64 + dx * i as i64) as usize,
+                    (cy as i64 + dy * i as i64) as usize,
+                )
+            },
             m,
         )
     })
@@ -122,10 +130,47 @@ fn screen_inside(
 /// So: capture the whole window once and take the bounding box of whatever differs
 /// from the background, between the title bar and the bottom toolbar. Returns it in
 /// global points.
-fn detect_device_rect(w: &stream::WindowInfo) -> Option<CGRect> {
+/// What a look at Device Hub's window found: the device's screen (global points) and
+/// how many times bigger the device could be drawn and still fit (0 when it doesn't).
+#[derive(Clone, Copy)]
+struct Found {
+    screen: CGRect,
+    room: f64,
+}
+
+/// Finds the device in Device Hub's window, first zooming the canvas so the device is
+/// drawn as large as fits (more pixels to stream): in while there's room for another
+/// step (about 1.25x), out when it's cut off. Returns its screen in global points.
+fn fit_hub(w: &stream::WindowInfo) -> Option<CGRect> {
+    const STEP: f64 = 1.3;
+    let mut last = None;
+    for _ in 0..10 {
+        let f = detect_device_rect(w);
+        let zoom_in = match f {
+            Some(f) if f.room >= STEP => true,
+            Some(f) if f.room >= 1.0 => return Some(f.screen),
+            // Too big (cut off, or grown into a side panel): back a step.
+            _ => false,
+        };
+        if !zoom_in && last == Some(true) {
+            // Just overshot: one step out fits, by the room measured before.
+            super::sim::hub_zoom(w.pid, false);
+            std::thread::sleep(Duration::from_millis(700));
+            return detect_device_rect(w).map(|f| f.screen);
+        }
+        if !super::sim::hub_zoom(w.pid, zoom_in) {
+            return f.map(|f| f.screen);
+        }
+        last = Some(zoom_in);
+        std::thread::sleep(Duration::from_millis(700));
+    }
+    detect_device_rect(w).map(|f| f.screen)
+}
+
+fn detect_device_rect(w: &stream::WindowInfo) -> Option<Found> {
     let (pw, ph) = super::size_for(w.frame.size.width, w.frame.size.height);
     let k = pw as f64 / w.frame.size.width.max(1.0);
-    let found: Arc<Mutex<Option<PixelRect>>> = Arc::new(Mutex::new(None));
+    let found: Arc<Mutex<Option<(PixelRect, f64)>>> = Arc::new(Mutex::new(None));
     let f2 = found.clone();
     let on_frame = move |sb: CMSampleBufferRef, ty: OutputType| unsafe {
         if ty != OutputType::Screen || !CMSampleBufferIsValid(sb) || f2.lock().is_some() {
@@ -153,25 +198,65 @@ fn detect_device_rect(w: &stream::WindowInfo) -> Option<CGRect> {
         let (top, bot) = ((60.0 * k) as usize, h.saturating_sub((110.0 * k) as usize));
         let bg = at((8.0 * k) as usize, h / 2);
         let differs = |x: usize, r: usize| (at(x, r) - bg).abs() > 14;
-        let (mut x0, mut x1, mut y0, mut y1) = (usize::MAX, 0, usize::MAX, 0);
-        for r in (top..bot).step_by(2) {
-            let n = (0..w).step_by(2).filter(|&x| differs(x, r)).count();
-            if n * 2 > w / 50 {
-                y0 = y0.min(r);
-                y1 = y1.max(r);
-            }
-        }
-        if y0 < y1 {
-            for x in (0..w).step_by(2) {
-                let n = (y0..=y1).step_by(2).filter(|&r| differs(x, r)).count();
-                if n * 2 > (y1 - y0) / 50 {
-                    x0 = x0.min(x);
-                    x1 = x1.max(x);
+        // Columns with something on them, grouped into bands. A band that reaches the
+        // window's left or right edge is a side panel (the sidebar, or the inspector
+        // with Appearance, Location...), never the device: drop those, keep the widest.
+        let gap = ((12.0 * k) as usize).max(4);
+        let edge = ((6.0 * k) as usize).max(2);
+        let mut bands: Vec<(usize, usize)> = Vec::new();
+        for x in (0..w).step_by(2) {
+            let n = (top..bot).step_by(2).filter(|&r| differs(x, r)).count();
+            if n * 2 > (bot - top) / 50 {
+                match bands.last_mut() {
+                    Some(b) if x <= b.1 + gap => b.1 = x,
+                    _ => bands.push((x, x)),
                 }
             }
         }
-        let found = (x0 < x1 && y0 < y1)
-            .then(|| screen_inside(&at, x0, y0, (x1 + 2).min(w), (y1 + 2).min(h)));
+        // The canvas between the panels: how big the device could get.
+        let cx0 = bands.iter().find(|b| b.0 <= edge).map_or(0, |b| b.1);
+        let cx1 = bands.iter().find(|b| b.1 + edge >= w).map_or(w, |b| b.0);
+        let (mut x0, mut x1) = bands
+            .into_iter()
+            .filter(|&(a, b)| a > edge && b + edge < w)
+            .max_by_key(|&(a, b)| b - a)
+            .unwrap_or((usize::MAX, 0));
+        let (mut y0, mut y1) = (usize::MAX, 0);
+        if x0 < x1 {
+            for r in (top..bot).step_by(2) {
+                let n = (x0..=x1).step_by(2).filter(|&x| differs(x, r)).count();
+                if n * 2 > (x1 - x0) / 50 {
+                    y0 = y0.min(r);
+                    y1 = y1.max(r);
+                }
+            }
+            // The device's own outline within those rows.
+            let (mut a, mut b) = (usize::MAX, 0);
+            if y0 < y1 {
+                for x in (x0..=x1).step_by(2) {
+                    let n = (y0..=y1).step_by(2).filter(|&r| differs(x, r)).count();
+                    if n * 2 > (y1 - y0) / 50 {
+                        a = a.min(x);
+                        b = b.max(x);
+                    }
+                }
+            }
+            (x0, x1) = (a, b);
+        }
+        let found = (x0 < x1 && y0 < y1).then(|| {
+            // Cut off by the toolbars (zoomed in too far): no room at all.
+            let clipped = y0 <= top + 4 || y1 + 6 >= bot;
+            let room = if clipped {
+                0.0
+            } else {
+                ((cx1.saturating_sub(cx0)) as f64 / (x1 - x0) as f64)
+                    .min((bot - top) as f64 / (y1 - y0) as f64)
+            };
+            (
+                screen_inside(&at, x0, y0, (x1 + 2).min(w), (y1 + 2).min(h)),
+                room,
+            )
+        });
         CVPixelBufferUnlockBaseAddress(pb, kCVPixelBufferLock_ReadOnly);
         if let Some(r) = found {
             *f2.lock() = Some(r);
@@ -207,7 +292,7 @@ fn detect_device_rect(w: &stream::WindowInfo) -> Option<CGRect> {
     while found.lock().is_none() && t.elapsed() < Duration::from_secs(3) {
         std::thread::sleep(Duration::from_millis(20));
     }
-    let (x0, y0, x1, y1) = (*found.lock())?;
+    let ((x0, y0, x1, y1), room) = (*found.lock())?;
     let r = CGRect {
         origin: CGPoint {
             x: w.frame.origin.x + x0 as f64 / k,
@@ -225,7 +310,7 @@ fn detect_device_rect(w: &stream::WindowInfo) -> Option<CGRect> {
         r.size.width,
         r.size.height
     );
-    Some(r)
+    Some(Found { screen: r, room })
 }
 
 /// The window --app streams. At startup a missing window is an error; afterwards
@@ -327,6 +412,8 @@ pub struct Capturer {
     /// Device Hub: the window (for finding the device again) and the answer.
     win_info: Option<stream::WindowInfo>,
     recrop: Arc<Mutex<Option<Option<CGRect>>>>,
+    recrop_busy: Arc<std::sync::atomic::AtomicBool>,
+    last_recrop: Instant,
 }
 
 /// Number from a CFNumber value of a frame-info dictionary.
@@ -349,7 +436,7 @@ impl Capturer {
                     w = wait_for_window(&t)?;
                 }
                 let crop = if hub && t.screen_only {
-                    detect_device_rect(&w).unwrap_or(w.frame)
+                    fit_hub(&w).unwrap_or(w.frame)
                 } else {
                     super::crop_for(&t, &w)
                 };
@@ -515,6 +602,8 @@ impl Capturer {
             win_frame,
             win_info: hub_info,
             recrop: Arc::new(Mutex::new(None)),
+            recrop_busy: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            last_recrop: Instant::now(),
         };
         // The stream opens with a full frame; have it before anything is converted.
         let t = Instant::now();
@@ -567,23 +656,31 @@ impl Capturer {
             self.damaged = true;
             self.damaged_at.get_or_insert_with(Instant::now);
         }
-        // After a fold or rotation, look for the device again (off this thread) and
-        // restart only if its outline really moved.
-        if super::sim::take_recrop() {
+        // Every couple of seconds, and soon after a fold or rotation, look for the
+        // device again (off this thread: zooming, folding, rotating, a panel opening all
+        // move it without the window changing) and restart only if its outline moved.
+        let due = super::sim::take_recrop() || self.last_recrop.elapsed() >= RECHECK_EVERY;
+        if due && !self.recrop_busy.load(Ordering::Relaxed) {
             if let Some(w) = self.win_info.clone() {
+                self.last_recrop = Instant::now();
+                self.recrop_busy.store(true, Ordering::Relaxed);
                 let slot = self.recrop.clone();
+                let busy = self.recrop_busy.clone();
                 std::thread::spawn(move || {
-                    *slot.lock() = Some(detect_device_rect(&w));
+                    *slot.lock() = Some(fit_hub(&w));
+                    busy.store(false, Ordering::Relaxed);
                 });
             }
         }
         if let Some(found) = self.recrop.lock().take() {
             let b = self.geometry.bounds;
+            // Finding the outline wobbles by a few points between looks: ignore that.
+            let tol = (b.size.width.max(b.size.height) * 0.015).max(6.0);
             let moved = found.is_some_and(|r| {
-                (r.origin.x - b.origin.x).abs() > 2.0
-                    || (r.origin.y - b.origin.y).abs() > 2.0
-                    || (r.size.width - b.size.width).abs() > 2.0
-                    || (r.size.height - b.size.height).abs() > 2.0
+                (r.origin.x - b.origin.x).abs() > tol
+                    || (r.origin.y - b.origin.y).abs() > tol
+                    || (r.size.width - b.size.width).abs() > tol
+                    || (r.size.height - b.size.height).abs() > tol
             });
             if moved {
                 log::info!("device changed shape; restarting capture");
