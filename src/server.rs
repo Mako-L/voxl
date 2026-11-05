@@ -355,6 +355,10 @@ fn handle_text(s: &AppState, c: &Arc<Client>, t: &str, rtts: &mut std::collectio
             }
         }
         "r" => input(InputEvent::ReleaseAll),
+        // dv,<action>: a device button of the streamed iOS Simulator (home, lock,
+        // volup, voldown, portrait, landscape-left, ...).
+        #[cfg(target_os = "macos")]
+        "dv" => crate::mac::sim::device_action(rest),
         "c" => input(InputEvent::Clipboard(crate::desktop::ClipContent::Text(
             rest.to_string(),
         ))),

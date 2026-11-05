@@ -72,6 +72,9 @@ Desktop (this Mac's screen):
                                 covered, raised when a viewer clicks or types
   --window-title                with --app: only windows whose title contains
                                 this (e.g. \"iPhone 17\" for one simulator)
+  --sim-screen                  with --app=Simulator: stream just the device
+                                screen, not the window around it (default true);
+                                viewers get its buttons and rotation either way
   --capture-scale               streamed pixels per point (default: native,
                                 within the budget)
   --max-capture-pixels          pixel budget for the automatic scale

@@ -143,7 +143,15 @@ async fn serve(a: HashMap<String, String>) {
         .unwrap_or(4) as u32;
     let vcfg = video::VideoConfig {
         display: display.clone(),
-        fps: range_max(a.get("framerate"), 60.0) as u32,
+        // With --app (macOS) one small window streams at up to 120 fps (see mac::init).
+        fps: range_max(
+            a.get("framerate"),
+            if cfg!(target_os = "macos") && a.contains_key("app") {
+                120.0
+            } else {
+                60.0
+            },
+        ) as u32,
         preset: a
             .get("preset")
             .cloned()
@@ -326,6 +334,11 @@ async fn serve(a: HashMap<String, String>) {
     {
         let mut extra = hub.hello_extra.lock();
         extra.insert("os".into(), std::env::consts::OS.into());
+        // The iOS Simulator: viewers get its hardware buttons and rotation (`dv,...`).
+        #[cfg(target_os = "macos")]
+        if !read_only && mac::streams_simulator() {
+            extra.insert("sim".into(), true.into());
+        }
         extra.insert("audio".into(), audio_on.into());
         extra.insert("mic".into(), mic.is_some().into());
         if read_only {

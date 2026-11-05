@@ -7,6 +7,7 @@ import { el } from './app';
 import { createAudio } from './audio';
 import { createClipboard } from './clipboard';
 import { createCursor } from './cursor';
+import { setupDevice } from './device';
 import { setupExtraKeys } from './extrakeys';
 import { createFiles } from './files';
 import { setupKeyboard } from './keyboard';
@@ -100,6 +101,7 @@ function main() {
 	setupKeyboard(app, clipboard, onInteract);
 	setupToolbar(app, viewport);
 	const extraKeys = setupExtraKeys(app, viewport);
+	const device = setupDevice(app);
 	const files = createFiles(app);
 	const mic = createMic(app);
 	const resize = createResize(app);
@@ -145,6 +147,7 @@ function main() {
 				video.build(m.stripes && m.stripes.length ? m.stripes : [[0, m.h]]);
 				viewport.layout();
 				extraKeys.refresh();
+				device.setup(!!m.sim);
 				files.setup(m.files);
 				mic.setup(!!m.mic && !app.readOnly);
 				resize.setup(m.resize);

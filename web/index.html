@@ -228,6 +228,7 @@
 				pointer-events: none;
 			}
 			#kb-btn,
+			#dev-btn,
 			#keys-btn,
 			#zoom-reset,
 			#files-btn,
@@ -242,6 +243,7 @@
 			.zoomed #zoom-reset {
 				display: inline-grid !important;
 			}
+			#tools.sim #dev-btn,
 			#tools.touch #kb-btn,
 			#tools.touch #keys-btn,
 			#tools.files #files-btn,
@@ -709,6 +711,59 @@
 				color: #fff;
 				box-shadow: 0 0 0 1px #ffffff40 inset;
 			}
+			/* iOS Simulator device buttons (device.ts), above the toolbar on touch
+			   devices and below it with a mouse. */
+			#devpanel {
+				position: absolute;
+				right: calc(8px + env(safe-area-inset-right));
+				top: calc(52px + env(safe-area-inset-top));
+				display: none;
+				grid-template-columns: repeat(5, auto);
+				gap: 4px;
+				padding: 6px;
+				pointer-events: auto;
+				background: color-mix(in srgb, var(--surface-raised) 94%, transparent);
+				border: 1.5px solid var(--border-default);
+				border-radius: 12px;
+				box-shadow: var(--shadow-lg);
+				backdrop-filter: blur(30px);
+				-webkit-backdrop-filter: blur(30px);
+				font: 560 13px/1 var(--font);
+				z-index: 4;
+			}
+			#devpanel.open {
+				display: grid;
+			}
+			:has(#tools.touch) #devpanel {
+				top: auto;
+				bottom: calc(68px + env(safe-area-inset-bottom));
+			}
+			.xkeys:has(#tools.touch) #devpanel {
+				bottom: calc(var(--xk-h, 0px) + 64px);
+			}
+			.dk {
+				min-width: 52px;
+				height: 36px;
+				padding: 0 10px;
+				border: 0;
+				border-radius: 8px;
+				background: var(--fill-tertiary);
+				color: var(--text-strong);
+				font: inherit;
+				cursor: pointer;
+				white-space: nowrap;
+			}
+			.dk:active {
+				background: var(--fill-tertiary-pressed);
+			}
+			.dk.wide {
+				grid-column: 1 / -1;
+				color: var(--text-weak);
+			}
+			.dk.wide.on {
+				color: #fff;
+				background: color-mix(in srgb, var(--accent) 35%, transparent);
+			}
 			#hint {
 				position: absolute;
 				left: 50%;
@@ -744,7 +799,23 @@
 			aria-hidden="true"></textarea>
 		<div id="vv">
 			<div id="hint" role="status" aria-live="polite"></div>
+			<div id="devpanel" role="toolbar" aria-label="Device buttons"></div>
 			<div id="tools">
+				<button
+					id="dev-btn"
+					class="ib"
+					type="button"
+					title="Device buttons (Home, volume, rotation…)"
+					aria-label="Device buttons">
+					<svg class="i" viewBox="0 0 24 24" fill="none">
+						<path
+							d="M11 18H13M8 2H16C17.1046 2 18 2.89543 18 4V20C18 21.1046 17.1046 22 16 22H8C6.89543 22 6 21.1046 6 20V4C6 2.89543 6.89543 2 8 2Z"
+							stroke="currentColor"
+							stroke-width="2"
+							stroke-linecap="round"
+							stroke-linejoin="round" />
+					</svg>
+				</button>
 				<button
 					id="zoom-reset"
 					class="ib"

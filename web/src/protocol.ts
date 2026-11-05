@@ -45,6 +45,8 @@ export interface Hello {
 	readOnly?: boolean;
 	/** Dynamic resolution: desktop pixels per CSS pixel of the viewer's window. */
 	resize?: { scale: number };
+	/** The stream is the iOS Simulator: its device buttons work (`dv,...`). */
+	sim?: boolean;
 }
 
 /** JSON text messages from the server. */
@@ -70,6 +72,8 @@ export const cmd = {
 	mic: (on: boolean) => `mi,${on ? 1 : 0}`,
 	/** Ask for a desktop of this size (dynamic resolution). */
 	resize: (w: number, h: number) => `sz,${w},${h}`,
+	/** A device button of the streamed iOS Simulator (home, lock, volup, portrait, ...). */
+	device: (action: string) => `dv,${action}`,
 	keyframe: 'kf',
 	pong: (sent: number) => `po,${sent}`,
 } as const;

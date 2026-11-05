@@ -316,6 +316,19 @@ new one. The window is captured even while other windows cover it, and the app i
 brought to the front when a viewer clicks or types, so input reaches it.
 `--enable-resize` doesn't apply in this mode.
 
+In this mode voxl captures at up to 120 fps (the window is small, and the Simulator
+renders at ProMotion rates; `--framerate` overrides it).
+
+For the iOS Simulator, the stream is cropped to the device screen (no title bar or
+bezel; `--sim-screen=false` keeps the whole window), and the viewer's toolbar gets a
+device button with the iPhone's hardware: Home, Lock, volume, Action, Siri,
+screenshot, shake and rotate. On a phone or tablet the simulated iPhone also follows
+the viewer's orientation: turn your phone sideways (or fold/unfold it) and the
+Simulator rotates to match; the panel turns this off. The buttons press the
+Simulator's own menu items, so voxl needs the Accessibility permission it already
+asks for. Browsers don't hand web pages the phone's physical volume keys, so volume
+is on-screen buttons.
+
 ## FAQ
 
 **Why a WebSocket and not WebRTC?** One WebSocket goes wherever a web page does: through

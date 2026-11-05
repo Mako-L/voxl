@@ -49,9 +49,9 @@ export function createViewport(
 	// Surface's top left relative to the visible area's, in CSS px.
 	let pan = { x: 0, y: 0 };
 	let barH = 0;
-	// Visible height without the keyboard, frozen while it is up.
+	// Visible height without the keyboard (the layout viewport's).
 	let fullH = vv ? vv.height : window.innerHeight;
-	let fullW = vv ? vv.width : window.innerWidth;
+	let lastW = vv ? vv.width : window.innerWidth;
 	let kbOpen = false;
 	let kbSeen = false;
 	let focus: { x: number; y: number } | null = null;
@@ -69,7 +69,7 @@ export function createViewport(
 		liftParam !== null && Number.isFinite(Number(liftParam))
 			? Math.max(0, Number(liftParam))
 			: /Android/i.test(navigator.userAgent)
-				? 18
+				? 36
 				: 0;
 
 	function area() {
@@ -85,23 +85,28 @@ export function createViewport(
 	function updateKeyboard() {
 		const h = vv ? vv.height : window.innerHeight;
 		const w = vv ? vv.width : window.innerWidth;
-		const soft = softKeyboard();
-		// Rotating, or the window changing width, starts over.
-		if (Math.abs(w - fullW) > 1) {
-			fullW = w;
-			if (!soft) fullH = h;
+		// The tallest the visible area has been at this width: browsers differ in
+		// whether the page's own height (innerHeight) shrinks with the keyboard (Chrome
+		// on Android does, on some devices), so only a visible area well short of that
+		// means a keyboard is up. Rotating or folding (a new width) starts over.
+		if (Math.abs(w - lastW) > 1) {
+			lastW = w;
+			fullH = h;
 		}
-		const shrunk = h < fullH * 0.85;
-		const open = soft && (shrunk || !vv);
-		if (!soft) fullH = h;
+		fullH = Math.max(fullH, h);
+		const shrunk = !!vv && h < fullH * 0.85;
+		// Up for our textarea (Android can bring it back on its own): that's typing.
+		if (shrunk && document.activeElement === kbd && !kbd.dataset.soft)
+			kbd.dataset.soft = '1';
+		const soft = softKeyboard();
 		if (soft && shrunk) kbSeen = true;
 		// Android's back button hides the keyboard without blurring the textarea.
 		if (soft && kbSeen && !shrunk) {
 			kbSeen = false;
 			delete kbd.dataset.soft;
 			kbd.blur();
-			fullH = h;
 		}
+		const open = shrunk;
 		if (open && !kbOpen) wantFocus = true;
 		kbOpen = open;
 		document.documentElement.classList.toggle('kb-open', kbOpen);

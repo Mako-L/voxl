@@ -117,6 +117,9 @@ pub struct Capturer {
     rebuild: bool,
     /// With --app: the CGWindowID being streamed.
     window: Option<u32>,
+    /// With --app: the window's frame (global points); `geometry.bounds` is the part
+    /// of it that is streamed.
+    win_frame: CGRect,
 }
 
 /// Number from a CFNumber value of a frame-info dictionary.
@@ -133,16 +136,17 @@ impl Capturer {
         let (source, geometry, window) = match super::app_target() {
             Some(t) => {
                 let w = wait_for_window(&t)?;
-                let (width, _) = super::size_for(w.frame.size.width, w.frame.size.height);
+                let crop = super::crop_for(&t, &w);
+                let (width, _) = super::size_for(crop.size.width, crop.size.height);
                 let g = Geometry {
                     display: super::display_of(&w.frame).unwrap_or(display),
-                    bounds: w.frame,
+                    bounds: crop,
                     width,
                     pid: Some(w.pid),
                 };
                 // Have the app in front from the start, so the first tap lands in it.
                 super::raise_app(w.pid);
-                (Source::Window(w.id), g, Some(w.id))
+                (Source::Window(w.id), g, Some((w.id, w.frame)))
             }
             None => {
                 let (width, _) = super::capture_size(display);
@@ -157,6 +161,21 @@ impl Capturer {
         };
         let (width, height) =
             super::size_for(geometry.bounds.size.width, geometry.bounds.size.height);
+        let win_frame = window.map(|(_, f)| f).unwrap_or(geometry.bounds);
+        // Part of the window to stream, in the window's own points.
+        let crop_src = (window.is_some() && geometry.bounds != win_frame).then(|| {
+            objc2_core_foundation::CGRect::new(
+                objc2_core_foundation::CGPoint::new(
+                    geometry.bounds.origin.x - win_frame.origin.x,
+                    geometry.bounds.origin.y - win_frame.origin.y,
+                ),
+                objc2_core_foundation::CGSize::new(
+                    geometry.bounds.size.width,
+                    geometry.bounds.size.height,
+                ),
+            )
+        });
+        let window = window.map(|(id, _)| id);
         *super::GEOMETRY.lock() = Some(geometry);
         let fps = super::fps();
         let incoming = Arc::new(Mutex::new(Incoming::default()));
@@ -242,6 +261,9 @@ impl Capturer {
                 cfg.setShowsCursor(!super::desktop::cursor_readable());
                 cfg.setCaptureResolution(SCCaptureResolutionType::Best);
                 cfg.setQueueDepth(6);
+                if let Some(r) = crop_src {
+                    cfg.setSourceRect(r);
+                }
                 // A single window: just its pixels, without the drop shadow around it
                 // (macOS 14+).
                 if window.is_some()
@@ -273,6 +295,7 @@ impl Capturer {
             last_check: Instant::now(),
             rebuild: false,
             window,
+            win_frame,
         };
         // The stream opens with a full frame; have it before anything is converted.
         let t = Instant::now();
@@ -334,10 +357,8 @@ impl Capturer {
                         log::info!("streamed window closed; looking for another");
                         self.rebuild = true;
                     }
-                    Some(b)
-                        if super::size_for(b.size.width, b.size.height)
-                            != (self.width, self.height) =>
-                    {
+                    // Resized (the Simulator rotating, a new device): crop and size anew.
+                    Some(b) if b.size != self.win_frame.size => {
                         log::info!(
                             "streamed window resized to {}x{} points; restarting capture",
                             b.size.width,
@@ -345,8 +366,11 @@ impl Capturer {
                         );
                         self.rebuild = true;
                     }
-                    Some(b) if b.origin != self.geometry.bounds.origin => {
-                        self.geometry.bounds = b;
+                    Some(b) if b.origin != self.win_frame.origin => {
+                        // Moved: the streamed part moves with it.
+                        self.geometry.bounds.origin.x += b.origin.x - self.win_frame.origin.x;
+                        self.geometry.bounds.origin.y += b.origin.y - self.win_frame.origin.y;
+                        self.win_frame = b;
                         if let Some(d) = super::display_of(&b) {
                             self.geometry.display = d;
                         }

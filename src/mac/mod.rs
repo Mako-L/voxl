@@ -21,6 +21,7 @@ pub mod ffi;
 pub mod input;
 pub mod mic;
 pub mod screen;
+pub mod sim;
 pub mod stream;
 
 use ffi::*;
@@ -57,6 +58,9 @@ pub struct AppTarget {
     pub query: String,
     /// Only windows whose title contains this (case-insensitive).
     pub title: Option<String>,
+    /// For the iOS Simulator: stream just the device screen, not the window around it
+    /// (`--sim-screen`, default true).
+    pub screen_only: bool,
 }
 
 struct Settings {
@@ -89,6 +93,10 @@ pub fn init(a: &HashMap<String, String>) {
                 .get("window-title")
                 .map(|t| t.trim().to_lowercase())
                 .filter(|t| !t.is_empty()),
+            screen_only: !matches!(
+                a.get("sim-screen").map(|v| v.as_str()),
+                Some("false" | "0" | "no" | "off")
+            ),
         });
     {
         let mut s = SETTINGS.lock();
@@ -100,6 +108,12 @@ pub fn init(a: &HashMap<String, String>) {
             .filter(|&v: &f64| v > 0.0);
         if let Some(px) = a.get("max-capture-pixels").and_then(|v| v.parse().ok()) {
             s.max_pixels = px;
+        }
+        // One app's window is small, so stream it at up to 120 fps by default: the
+        // Simulator renders at ProMotion rates, and capturing a 60 Hz source at exactly
+        // 60 Hz drops every frame that lands just before the interval.
+        if app.is_some() {
+            s.fps = 120;
         }
         // Selkies-style ranges ("60-60"): the upper bound.
         if let Some(f) = a
@@ -130,25 +144,26 @@ pub fn init(a: &HashMap<String, String>) {
         match find_window(t) {
             Ok(w) => {
                 let d = display_of(&w.frame).unwrap_or(display);
+                let c = crop_for(t, &w);
                 let mut s = SETTINGS.lock();
                 if s.scale.is_none() {
                     s.scale = Some(auto_scale(
-                        w.frame.size.width,
-                        w.frame.size.height,
+                        c.size.width,
+                        c.size.height,
                         native_scale(d),
                         s.max_pixels,
                     ));
                 }
                 drop(s);
-                let (pw, ph) = size_for(w.frame.size.width, w.frame.size.height);
+                let (pw, ph) = size_for(c.size.width, c.size.height);
                 log::info!(
                     "streaming the window \"{}\" of {} ({}, pid {}): {}x{} points, {pw}x{ph} pixels",
                     w.title,
                     w.app,
                     w.bundle,
                     w.pid,
-                    w.frame.size.width,
-                    w.frame.size.height,
+                    c.size.width,
+                    c.size.height,
                 );
             }
             Err(e) => {
@@ -224,6 +239,25 @@ pub fn display() -> u32 {
 /// `--app`, when one app's window is streamed instead of a display.
 pub fn app_target() -> Option<AppTarget> {
     SETTINGS.lock().app.clone()
+}
+
+/// Whether `--app` streams the iOS Simulator (viewers get its device buttons).
+pub fn streams_simulator() -> bool {
+    app_target()
+        .and_then(|t| find_window(&t).ok())
+        .is_some_and(|w| w.bundle == sim::BUNDLE_ID)
+}
+
+/// The part of window `w` to stream, in global points: with `--sim-screen`, the
+/// Simulator's device screen; otherwise the whole window.
+pub fn crop_for(t: &AppTarget, w: &stream::WindowInfo) -> CGRect {
+    if t.screen_only && w.bundle == sim::BUNDLE_ID {
+        if let Some(r) = sim::screen_rect(w.pid, &w.frame) {
+            return r;
+        }
+        log::warn!("couldn't find the device screen in the Simulator window; streaming all of it");
+    }
+    w.frame
 }
 
 fn matches(t: &AppTarget, w: &stream::WindowInfo, exact: bool) -> bool {
