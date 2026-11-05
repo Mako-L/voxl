@@ -149,7 +149,13 @@ extern "C" {
     ) -> CGContextRef;
     pub fn CGContextDrawImage(c: CGContextRef, r: CGRect, image: CGImageRef);
     pub fn CGContextRelease(c: CGContextRef);
+    pub fn CGWindowListCopyWindowInfo(option: u32, relative_to: u32) -> CFArrayRef;
+    pub static kCGWindowBounds: CFStringRef;
+    pub static kCGWindowNumber: CFStringRef;
 }
+
+/// CGWindowListCopyWindowInfo: just the window given as `relative_to`.
+pub const kCGWindowListOptionIncludingWindow: u32 = 1 << 3;
 
 pub const kCGEventSourceStateHIDSystemState: i32 = 1;
 pub const kCGHIDEventTap: u32 = 0;

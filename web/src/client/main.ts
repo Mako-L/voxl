@@ -7,6 +7,7 @@ import { el } from './app';
 import { createAudio } from './audio';
 import { createClipboard } from './clipboard';
 import { createCursor } from './cursor';
+import { setupExtraKeys } from './extrakeys';
 import { createFiles } from './files';
 import { setupKeyboard } from './keyboard';
 import { createMic } from './mic';
@@ -14,6 +15,7 @@ import { setupPointer } from './pointer';
 import { createResize } from './resize';
 import { setupToolbar } from './toolbar';
 import { createVideo } from './video';
+import { createViewport } from './viewport';
 
 /**
  * Commands a read-only viewer sends: acks, video and audio on/off, keyframe requests
@@ -78,13 +80,15 @@ function main() {
 		inIframe: window !== window.top,
 		desk: { w: 0, h: 0 },
 		view: { scale: 1 },
+		mods: { active: () => [], consume: () => {} },
 	};
 
 	const cursor = createCursor(app);
 	const useVideo =
 		params.get('present') !== 'canvas' &&
 		typeof MediaStreamTrackGenerator !== 'undefined';
-	const video = createVideo(app, canvas, useVideo, cursor.apply);
+	const video = createVideo(app, canvas, useVideo);
+	const viewport = createViewport(app, video.stripes, cursor.apply);
 	const clipboard = createClipboard(app);
 	const audio = createAudio(app);
 	// Browsers only allow audio and clipboard writes after a user gesture.
@@ -92,9 +96,10 @@ function main() {
 		audio.start();
 		clipboard.flush();
 	};
-	setupPointer(app, onInteract);
+	setupPointer(app, viewport, onInteract);
 	setupKeyboard(app, clipboard, onInteract);
-	setupToolbar(app, video.layout);
+	setupToolbar(app, viewport);
+	const extraKeys = setupExtraKeys(app, viewport);
 	const files = createFiles(app);
 	const mic = createMic(app);
 	const resize = createResize(app);
@@ -120,7 +125,7 @@ function main() {
 		if (document.hidden) app.send(cmd.releaseAll);
 	});
 	window.addEventListener('resize', () => {
-		video.layout();
+		viewport.layout();
 		updateVisibility();
 	});
 	updateVisibility();
@@ -138,7 +143,8 @@ function main() {
 				app.readOnly = !!m.readOnly;
 				app.tools.classList.toggle('read-only', app.readOnly);
 				video.build(m.stripes && m.stripes.length ? m.stripes : [[0, m.h]]);
-				video.layout();
+				viewport.layout();
+				extraKeys.refresh();
 				files.setup(m.files);
 				mic.setup(!!m.mic && !app.readOnly);
 				resize.setup(m.resize);

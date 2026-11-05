@@ -4,7 +4,7 @@
 //! screen is still, and x264 skips the macroblocks that didn't change.
 
 use super::ffi::*;
-use super::stream::{self, OutputType};
+use super::stream::{self, OutputType, Source};
 use super::Geometry;
 use nix::unistd::{read, write};
 use objc2_core_foundation::CFString;
@@ -14,11 +14,40 @@ use objc2_screen_capture_kit::{
 use parking_lot::Mutex;
 use std::ffi::c_void;
 use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 pub static DAMAGE_EVENTS: AtomicU64 = AtomicU64::new(0);
+
+/// Set once the first capture started: from then on a missing --app window is waited
+/// for (the app restarting, the Simulator switching devices) instead of failing.
+static STARTED: AtomicBool = AtomicBool::new(false);
+
+/// The window --app streams. At startup a missing window is an error; afterwards
+/// capture waits for one to show up again.
+fn wait_for_window(t: &super::AppTarget) -> Result<stream::WindowInfo, String> {
+    let t0 = Instant::now();
+    let mut said = false;
+    loop {
+        match super::find_window(t) {
+            Ok(w) => {
+                if said {
+                    log::info!("window of {} is back", w.app);
+                }
+                return Ok(w);
+            }
+            Err(e) if !STARTED.load(Ordering::Relaxed) => return Err(e),
+            Err(e) => {
+                if !said || t0.elapsed() > Duration::from_secs(30) {
+                    log::warn!("--app={}: {e}; waiting for a window", t.query);
+                    said = true;
+                }
+                std::thread::sleep(Duration::from_millis(500));
+            }
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug)]
 pub struct Band {
@@ -86,6 +115,8 @@ pub struct Capturer {
     stream: stream::Stream,
     last_check: Instant,
     rebuild: bool,
+    /// With --app: the CGWindowID being streamed.
+    window: Option<u32>,
 }
 
 /// Number from a CFNumber value of a frame-info dictionary.
@@ -99,12 +130,33 @@ unsafe fn dict_i64(dict: CFDictionaryRef, key: *const c_void) -> Option<i64> {
 impl Capturer {
     pub fn new(_display: Option<&str>) -> Result<Self, String> {
         let display = super::display();
-        let (width, height) = super::capture_size(display);
-        let geometry = Geometry {
-            display,
-            bounds: unsafe { CGDisplayBounds(display) },
-            width,
+        let (source, geometry, window) = match super::app_target() {
+            Some(t) => {
+                let w = wait_for_window(&t)?;
+                let (width, _) = super::size_for(w.frame.size.width, w.frame.size.height);
+                let g = Geometry {
+                    display: super::display_of(&w.frame).unwrap_or(display),
+                    bounds: w.frame,
+                    width,
+                    pid: Some(w.pid),
+                };
+                // Have the app in front from the start, so the first tap lands in it.
+                super::raise_app(w.pid);
+                (Source::Window(w.id), g, Some(w.id))
+            }
+            None => {
+                let (width, _) = super::capture_size(display);
+                let g = Geometry {
+                    display,
+                    bounds: unsafe { CGDisplayBounds(display) },
+                    width,
+                    pid: None,
+                };
+                (Source::Display(display), g, None)
+            }
         };
+        let (width, height) =
+            super::size_for(geometry.bounds.size.width, geometry.bounds.size.height);
         *super::GEOMETRY.lock() = Some(geometry);
         let fps = super::fps();
         let incoming = Arc::new(Mutex::new(Incoming::default()));
@@ -167,7 +219,7 @@ impl Capturer {
             let _ = write(&wake_w, &[1u8]);
         };
         let stream = stream::start(
-            display,
+            source,
             "capture",
             &[OutputType::Screen],
             |cfg| unsafe {
@@ -190,6 +242,16 @@ impl Capturer {
                 cfg.setShowsCursor(!super::desktop::cursor_readable());
                 cfg.setCaptureResolution(SCCaptureResolutionType::Best);
                 cfg.setQueueDepth(6);
+                // A single window: just its pixels, without the drop shadow around it
+                // (macOS 14+).
+                if window.is_some()
+                    && objc2_foundation::NSObjectProtocol::respondsToSelector(
+                        cfg,
+                        objc2::sel!(setIgnoreShadowsSingleWindow:),
+                    )
+                {
+                    cfg.setIgnoreShadowsSingleWindow(true);
+                }
             },
             on_frame,
         )?;
@@ -210,6 +272,7 @@ impl Capturer {
             stream,
             last_check: Instant::now(),
             rebuild: false,
+            window,
         };
         // The stream opens with a full frame; have it before anything is converted.
         let t = Instant::now();
@@ -221,7 +284,15 @@ impl Capturer {
             log::warn!("no frame from ScreenCaptureKit yet");
         }
         me.grab(me.full())?;
-        log::info!("capturing display {display} with ScreenCaptureKit at {width}x{height}");
+        STARTED.store(true, Ordering::Relaxed);
+        match window {
+            Some(id) => {
+                log::info!("capturing window {id} with ScreenCaptureKit at {width}x{height}")
+            }
+            None => {
+                log::info!("capturing display {display} with ScreenCaptureKit at {width}x{height}")
+            }
+        }
         Ok(me)
     }
 
@@ -254,7 +325,37 @@ impl Capturer {
             self.damaged = true;
             self.damaged_at.get_or_insert_with(Instant::now);
         }
-        if self.last_check.elapsed() >= Duration::from_secs(1) {
+        if let Some(id) = self.window {
+            // The window moves (input has to follow it), resizes or closes.
+            if self.last_check.elapsed() >= Duration::from_millis(250) {
+                self.last_check = Instant::now();
+                match super::window_bounds(id) {
+                    None => {
+                        log::info!("streamed window closed; looking for another");
+                        self.rebuild = true;
+                    }
+                    Some(b)
+                        if super::size_for(b.size.width, b.size.height)
+                            != (self.width, self.height) =>
+                    {
+                        log::info!(
+                            "streamed window resized to {}x{} points; restarting capture",
+                            b.size.width,
+                            b.size.height
+                        );
+                        self.rebuild = true;
+                    }
+                    Some(b) if b.origin != self.geometry.bounds.origin => {
+                        self.geometry.bounds = b;
+                        if let Some(d) = super::display_of(&b) {
+                            self.geometry.display = d;
+                        }
+                        *super::GEOMETRY.lock() = Some(self.geometry);
+                    }
+                    Some(_) => {}
+                }
+            }
+        } else if self.last_check.elapsed() >= Duration::from_secs(1) {
             self.last_check = Instant::now();
             // Resolution changed (System Settings, another display arrangement).
             let b = unsafe { CGDisplayBounds(self.geometry.display) };

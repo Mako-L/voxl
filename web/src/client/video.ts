@@ -1,4 +1,4 @@
-// Presenting decoded frames and fitting the desktop to the window.
+// Presenting decoded frames (viewport.ts sizes and places them).
 import type { Stripe, StripeFrame } from '../protocol';
 import type { App } from './app';
 
@@ -36,13 +36,10 @@ function write(o: StripeOut, frame: VideoFrame) {
 		});
 }
 
-const gcd = (a: number, b: number): number => (b ? gcd(b, a % b) : a);
-
 export function createVideo(
 	app: App,
 	canvas: HTMLCanvasElement,
-	useVideo: boolean,
-	onLayout: () => void
+	useVideo: boolean
 ) {
 	let outs: StripeOut[] = [];
 	let stripes: Stripe[] = [[0, 1]];
@@ -83,24 +80,5 @@ export function createVideo(
 		}
 	}
 
-	function layout() {
-		const { w: dw, h: dh } = app.desk;
-		if (!dw) return;
-		const vw = window.innerWidth,
-			vh = window.innerHeight;
-		const dpr = window.devicePixelRatio || 1;
-		// Snap the height so every stripe boundary lands on a whole device pixel;
-		// otherwise the stacked stripe layers show hairline seams.
-		const q = dh / stripes.reduce((g, [y]) => gcd(g, y), dh);
-		const devH = Math.max(
-			q,
-			Math.floor(((Math.min(vw / dw, vh / dh) || 1) * dh * dpr) / q) * q
-		);
-		app.view.scale = devH / dpr / dh;
-		app.surface.style.width = `${dw * app.view.scale}px`;
-		app.surface.style.height = `${dh * app.view.scale}px`;
-		onLayout();
-	}
-
-	return { build, present, layout };
+	return { build, present, stripes: () => stripes };
 }

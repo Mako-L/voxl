@@ -4,7 +4,14 @@
 		<meta charset="utf-8" />
 		<meta
 			name="viewport"
-			content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+			content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover,interactive-widget=resizes-visual" />
+		<!-- Added to a phone's Home Screen, the page opens full screen like an app. -->
+		<meta name="mobile-web-app-capable" content="yes" />
+		<meta name="apple-mobile-web-app-capable" content="yes" />
+		<meta
+			name="apple-mobile-web-app-status-bar-style"
+			content="black-translucent" />
+		<meta name="theme-color" content="#000000" />
 		<!-- The server fills in the title (index_html in src/server.rs). -->
 		<meta name="application-name" content="{{title}}" />
 		<meta name="apple-mobile-web-app-title" content="{{title}}" />
@@ -71,15 +78,30 @@
 				overscroll-behavior: none;
 			}
 			body {
-				display: flex;
-				align-items: center;
-				justify-content: center;
 				-webkit-font-smoothing: antialiased;
+				-webkit-user-select: none;
+				user-select: none;
+				-webkit-touch-callout: none;
+				-webkit-tap-highlight-color: transparent;
 			}
+			/* Sized and placed by viewport.ts: fitted, zoomed and panned. */
 			#surface {
-				position: relative;
+				position: fixed;
+				left: 0;
+				top: 0;
 				outline: none;
 				touch-action: none;
+			}
+			/* Follows the visual viewport (the part above a phone's keyboard), so the
+			   toolbar and the extra keys stay in sight while typing. */
+			#vv {
+				position: fixed;
+				left: 0;
+				top: 0;
+				width: 100%;
+				height: 100%;
+				pointer-events: none;
+				z-index: 3;
 			}
 			#screen {
 				position: absolute;
@@ -101,7 +123,7 @@
 			#kbd {
 				position: fixed;
 				left: 0;
-				bottom: 0;
+				top: 0;
 				width: 1px;
 				height: 1px;
 				opacity: 0.01;
@@ -130,9 +152,9 @@
 
 			/* Toolbar: ghost icon buttons in a frosted bar, like the app's tooltip surface. */
 			#tools {
-				position: fixed;
-				top: 8px;
-				right: 8px;
+				position: absolute;
+				top: calc(8px + env(safe-area-inset-top));
+				right: calc(8px + env(safe-area-inset-right));
 				display: flex;
 				gap: 2px;
 				padding: 2px;
@@ -155,7 +177,14 @@
 			}
 			#tools.touch {
 				top: auto;
-				bottom: 12px;
+				bottom: calc(12px + env(safe-area-inset-bottom));
+			}
+			.xkeys #tools.touch {
+				bottom: calc(var(--xk-h, 0px) + 8px);
+			}
+			/* Out of the way while typing above a phone's keyboard. */
+			.kb-open #tools.touch {
+				opacity: 0.55;
 			}
 			.ib {
 				width: 28px;
@@ -194,18 +223,34 @@
 				width: 20px;
 				height: 20px;
 			}
+			.ib:disabled {
+				opacity: 0.35;
+				pointer-events: none;
+			}
 			#kb-btn,
+			#keys-btn,
+			#zoom-reset,
 			#files-btn,
 			#mic-btn {
 				display: none !important;
 			}
+			/* Fingers pinch to zoom; the buttons are for mice. */
+			#tools.touch #zoom-in,
+			#tools.touch #zoom-out {
+				display: none !important;
+			}
+			.zoomed #zoom-reset {
+				display: inline-grid !important;
+			}
 			#tools.touch #kb-btn,
+			#tools.touch #keys-btn,
 			#tools.files #files-btn,
 			#tools.mic #mic-btn {
 				display: inline-grid !important;
 			}
 			/* Read-only: nothing on the desktop accepts what the keyboard would send. */
-			#tools.read-only #kb-btn {
+			#tools.read-only #kb-btn,
+			#tools.read-only #keys-btn {
 				display: none !important;
 			}
 			/* While the microphone is live the toolbar stays up as a recording indicator. */
@@ -589,6 +634,102 @@
 				line-height: 20px;
 				letter-spacing: -0.1px;
 			}
+
+			/* Extra keys: two rows above the on-screen keyboard (extrakeys.ts). */
+			#xkeys {
+				position: absolute;
+				left: 0;
+				right: 0;
+				bottom: 0;
+				display: none;
+				flex-direction: column;
+				gap: 4px;
+				padding: 5px calc(4px + env(safe-area-inset-right)) 5px
+					calc(4px + env(safe-area-inset-left));
+				pointer-events: auto;
+				background: color-mix(in srgb, var(--surface-raised) 94%, transparent);
+				border-top: 1px solid var(--border-default);
+				backdrop-filter: blur(30px);
+				-webkit-backdrop-filter: blur(30px);
+				font: 560 14px/1 var(--font);
+				touch-action: none;
+			}
+			/* Keyboard down: clear the home indicator. */
+			html:not(.kb-open) #xkeys {
+				padding-bottom: calc(5px + env(safe-area-inset-bottom));
+			}
+			#xkeys.show {
+				display: flex;
+			}
+			.xrow {
+				display: flex;
+				gap: 4px;
+			}
+			.xk {
+				flex: 1 1 0;
+				min-width: 0;
+				height: 38px;
+				padding: 0;
+				border: 0;
+				border-radius: 8px;
+				background: var(--fill-tertiary);
+				color: var(--text-strong);
+				font: inherit;
+				letter-spacing: -0.2px;
+				white-space: nowrap;
+				overflow: hidden;
+				cursor: pointer;
+				-webkit-user-select: none;
+				user-select: none;
+				touch-action: none;
+				transition: background-color 0.08s;
+			}
+			.xk.down,
+			.xk:active {
+				background: var(--fill-tertiary-pressed);
+			}
+			.xk.act {
+				color: var(--text-weak);
+			}
+			.xk svg.i {
+				width: 20px;
+				height: 20px;
+				vertical-align: middle;
+				color: var(--icon-strong);
+			}
+			.xk.mod {
+				color: var(--text-default);
+			}
+			.xk.on {
+				background: color-mix(in srgb, var(--accent) 35%, transparent);
+				color: #fff;
+			}
+			.xk.lock {
+				background: var(--accent);
+				color: #fff;
+				box-shadow: 0 0 0 1px #ffffff40 inset;
+			}
+			#hint {
+				position: absolute;
+				left: 50%;
+				top: calc(16px + env(safe-area-inset-top));
+				transform: translateX(-50%);
+				max-width: min(340px, calc(100% - 32px));
+				padding: 10px 14px;
+				border-radius: 12px;
+				background: var(--surface-raised);
+				border: 1px solid var(--border-default);
+				box-shadow: var(--shadow-lg);
+				color: var(--text-strong);
+				font: 520 13px/18px var(--font);
+				text-align: center;
+				opacity: 0;
+				transition: opacity 0.15s;
+				pointer-events: none;
+			}
+			#hint.show {
+				opacity: 1;
+			}
 		</style>
 	</head>
 	<body>
@@ -601,81 +742,144 @@
 			spellcheck="false"
 			tabindex="-1"
 			aria-hidden="true"></textarea>
-		<div id="tools">
-			<button
-				id="kb-btn"
-				class="ib"
-				type="button"
-				title="Keyboard"
-				aria-label="Show keyboard">
-				<svg class="i" viewBox="0 0 24 24" fill="none">
-					<path
-						d="M6 16.125C6.48325 16.125 6.875 16.5168 6.875 17C6.875 17.4832 6.48325 17.875 6 17.875C5.51675 17.875 5.125 17.4832 5.125 17C5.125 16.5168 5.51675 16.125 6 16.125ZM18 16.125C18.4832 16.125 18.875 16.5168 18.875 17C18.875 17.4832 18.4832 17.875 18 17.875C17.5168 17.875 17.125 17.4832 17.125 17C17.125 16.5168 17.5168 16.125 18 16.125ZM6 12.125C6.48325 12.125 6.875 12.5168 6.875 13C6.875 13.4832 6.48325 13.875 6 13.875C5.51675 13.875 5.125 13.4832 5.125 13C5.125 12.5168 5.51675 12.125 6 12.125ZM10 12.125C10.4832 12.125 10.875 12.5168 10.875 13C10.875 13.4832 10.4832 13.875 10 13.875C9.51675 13.875 9.125 13.4832 9.125 13C9.125 12.5168 9.51675 12.125 10 12.125ZM14 12.125C14.4832 12.125 14.875 12.5168 14.875 13C14.875 13.4832 14.4832 13.875 14 13.875C13.5168 13.875 13.125 13.4832 13.125 13C13.125 12.5168 13.5168 12.125 14 12.125ZM18 12.125C18.4832 12.125 18.875 12.5168 18.875 13C18.875 13.4832 18.4832 13.875 18 13.875C17.5168 13.875 17.125 13.4832 17.125 13C17.125 12.5168 17.5168 12.125 18 12.125Z"
-						fill="currentColor"
-						stroke="currentColor"
-						stroke-width="0.75"
-						stroke-linecap="square" />
-					<path
-						d="M10 17H14M14 5L12 3L10 5M4 9H20C21.1046 9 22 9.89543 22 11V19C22 20.1046 21.1046 21 20 21H4C2.89543 21 2 20.1046 2 19V11C2 9.89543 2.89543 9 4 9Z"
-						stroke="currentColor"
-						stroke-width="2"
-						stroke-linecap="round"
-						stroke-linejoin="round" />
-				</svg>
-			</button>
-			<button
-				id="mic-btn"
-				class="ib"
-				type="button"
-				title="Turn microphone on"
-				aria-label="Microphone"
-				aria-pressed="false">
-				<svg class="i on" viewBox="0 0 24 24" fill="none">
-					<path
-						d="M12.0013 19V21M12.0013 19C8.32307 19 6.14811 16.7451 5.01562 15M12.0013 19C15.6795 19 17.8545 16.7451 18.987 15M16.0013 7V11C16.0013 13.2091 14.2104 15 12.0013 15C9.79215 15 8.00129 13.2091 8.00129 11V7C8.00129 4.79086 9.79215 3 12.0013 3C14.2104 3 16.0013 4.79086 16.0013 7Z"
-						stroke="currentColor"
-						stroke-width="2"
-						stroke-linecap="round"
-						stroke-linejoin="round" /></svg
-				><svg class="i off" viewBox="0 0 24 24" fill="none">
-					<path
-						d="M12 21V19M12 19C8.32179 19 6.14683 16.7451 5.01434 15M12 19C14.2282 19 15.9048 18.1725 17.1321 17.1321M9.51896 3.86222C10.2008 3.32235 11.0628 3 12 3C14.2092 3 16 4.79086 16 7V10.3433M3 3L8.00001 8.00001M8.00001 8.00001V11C8.00001 13.2091 9.79087 15 12 15C12.8492 15 13.6365 14.7354 14.2841 14.2841M8.00001 8.00001L14.2841 14.2841M14.2841 14.2841L17.1321 17.1321M17.1321 17.1321L21 21"
-						stroke="currentColor"
-						stroke-width="2"
-						stroke-linecap="round"
-						stroke-linejoin="round" />
-				</svg>
-			</button>
-			<button
-				id="files-btn"
-				class="ib"
-				type="button"
-				title="Files"
-				aria-label="Files">
-				<svg class="i" viewBox="0 0 24 24" fill="none">
-					<path
-						d="M3 6V17C3 18.1046 3.89543 19 5 19H19C20.1046 19 21 18.1046 21 17V9C21 7.89543 20.1046 7 19 7H12.5352C12.2008 7 11.8886 6.8329 11.7031 6.5547L10.5937 4.8906C10.2228 4.3342 9.59834 4 8.92963 4H5C3.89543 4 3 4.89543 3 6Z"
-						stroke="currentColor"
-						stroke-width="2"
-						stroke-linecap="round"
-						stroke-linejoin="round" />
-				</svg>
-			</button>
-			<button
-				id="fs-btn"
-				class="ib"
-				type="button"
-				title="Fullscreen (captures browser shortcuts)"
-				aria-label="Toggle fullscreen">
-				<svg class="i" viewBox="0 0 24 24" fill="none">
-					<path
-						d="M7 5H5C3.89543 5 3 5.89543 3 7V9M17 5H19C20.1046 5 21 5.89543 21 7V9M21 15V17C21 18.1046 20.1046 19 19 19H17M7 19H5C3.89543 19 3 18.1046 3 17V15"
-						stroke="currentColor"
-						stroke-width="2"
-						stroke-linecap="round"
-						stroke-linejoin="round" />
-				</svg>
-			</button>
+		<div id="vv">
+			<div id="hint" role="status" aria-live="polite"></div>
+			<div id="tools">
+				<button
+					id="zoom-reset"
+					class="ib"
+					type="button"
+					title="Fit to window"
+					aria-label="Fit to window">
+					<svg class="i" viewBox="0 0 24 24" fill="none">
+						<path
+							d="M4 9H9V4M20 9H15V4M4 15H9V20M20 15H15V20"
+							stroke="currentColor"
+							stroke-width="2"
+							stroke-linecap="round"
+							stroke-linejoin="round" />
+					</svg>
+				</button>
+				<button
+					id="zoom-out"
+					class="ib"
+					type="button"
+					title="Zoom out (Ctrl+Alt+-)"
+					aria-label="Zoom out">
+					<svg class="i" viewBox="0 0 24 24" fill="none">
+						<path
+							d="M8 11H14M20 20L16.05 16.05M18 11C18 14.866 14.866 18 11 18C7.13401 18 4 14.866 4 11C4 7.13401 7.13401 4 11 4C14.866 4 18 7.13401 18 11Z"
+							stroke="currentColor"
+							stroke-width="2"
+							stroke-linecap="round"
+							stroke-linejoin="round" />
+					</svg>
+				</button>
+				<button
+					id="zoom-in"
+					class="ib"
+					type="button"
+					title="Zoom in (Ctrl+Alt+=, or pinch)"
+					aria-label="Zoom in">
+					<svg class="i" viewBox="0 0 24 24" fill="none">
+						<path
+							d="M8 11H14M11 8V14M20 20L16.05 16.05M18 11C18 14.866 14.866 18 11 18C7.13401 18 4 14.866 4 11C4 7.13401 7.13401 4 11 4C14.866 4 18 7.13401 18 11Z"
+							stroke="currentColor"
+							stroke-width="2"
+							stroke-linecap="round"
+							stroke-linejoin="round" />
+					</svg>
+				</button>
+				<button
+					id="keys-btn"
+					class="ib"
+					type="button"
+					title="Extra keys (Esc, Ctrl, arrows…)"
+					aria-label="Extra keys">
+					<svg class="i" viewBox="0 0 24 24" fill="none">
+						<path
+							d="M9 6V18M15 6V18M6 9H18M6 15H18M9 9C9 7.34315 7.65685 6 6 6C4.34315 6 3 7.34315 3 9C3 10.6569 4.34315 12 6 12H9M15 9C15 7.34315 16.3431 6 18 6C19.6569 6 21 7.34315 21 9C21 10.6569 19.6569 12 18 12H15M9 15C9 16.6569 7.65685 18 6 18C4.34315 18 3 16.6569 3 15C3 13.3431 4.34315 12 6 12M15 15C15 16.6569 16.3431 18 18 18C19.6569 18 21 16.6569 21 15C21 13.3431 19.6569 12 18 12"
+							stroke="currentColor"
+							stroke-width="1.75"
+							stroke-linecap="round"
+							stroke-linejoin="round" />
+					</svg>
+				</button>
+				<button
+					id="kb-btn"
+					class="ib"
+					type="button"
+					title="Keyboard"
+					aria-label="Show keyboard">
+					<svg class="i" viewBox="0 0 24 24" fill="none">
+						<path
+							d="M6 16.125C6.48325 16.125 6.875 16.5168 6.875 17C6.875 17.4832 6.48325 17.875 6 17.875C5.51675 17.875 5.125 17.4832 5.125 17C5.125 16.5168 5.51675 16.125 6 16.125ZM18 16.125C18.4832 16.125 18.875 16.5168 18.875 17C18.875 17.4832 18.4832 17.875 18 17.875C17.5168 17.875 17.125 17.4832 17.125 17C17.125 16.5168 17.5168 16.125 18 16.125ZM6 12.125C6.48325 12.125 6.875 12.5168 6.875 13C6.875 13.4832 6.48325 13.875 6 13.875C5.51675 13.875 5.125 13.4832 5.125 13C5.125 12.5168 5.51675 12.125 6 12.125ZM10 12.125C10.4832 12.125 10.875 12.5168 10.875 13C10.875 13.4832 10.4832 13.875 10 13.875C9.51675 13.875 9.125 13.4832 9.125 13C9.125 12.5168 9.51675 12.125 10 12.125ZM14 12.125C14.4832 12.125 14.875 12.5168 14.875 13C14.875 13.4832 14.4832 13.875 14 13.875C13.5168 13.875 13.125 13.4832 13.125 13C13.125 12.5168 13.5168 12.125 14 12.125ZM18 12.125C18.4832 12.125 18.875 12.5168 18.875 13C18.875 13.4832 18.4832 13.875 18 13.875C17.5168 13.875 17.125 13.4832 17.125 13C17.125 12.5168 17.5168 12.125 18 12.125Z"
+							fill="currentColor"
+							stroke="currentColor"
+							stroke-width="0.75"
+							stroke-linecap="square" />
+						<path
+							d="M10 17H14M14 5L12 3L10 5M4 9H20C21.1046 9 22 9.89543 22 11V19C22 20.1046 21.1046 21 20 21H4C2.89543 21 2 20.1046 2 19V11C2 9.89543 2.89543 9 4 9Z"
+							stroke="currentColor"
+							stroke-width="2"
+							stroke-linecap="round"
+							stroke-linejoin="round" />
+					</svg>
+				</button>
+				<button
+					id="mic-btn"
+					class="ib"
+					type="button"
+					title="Turn microphone on"
+					aria-label="Microphone"
+					aria-pressed="false">
+					<svg class="i on" viewBox="0 0 24 24" fill="none">
+						<path
+							d="M12.0013 19V21M12.0013 19C8.32307 19 6.14811 16.7451 5.01562 15M12.0013 19C15.6795 19 17.8545 16.7451 18.987 15M16.0013 7V11C16.0013 13.2091 14.2104 15 12.0013 15C9.79215 15 8.00129 13.2091 8.00129 11V7C8.00129 4.79086 9.79215 3 12.0013 3C14.2104 3 16.0013 4.79086 16.0013 7Z"
+							stroke="currentColor"
+							stroke-width="2"
+							stroke-linecap="round"
+							stroke-linejoin="round" /></svg
+					><svg class="i off" viewBox="0 0 24 24" fill="none">
+						<path
+							d="M12 21V19M12 19C8.32179 19 6.14683 16.7451 5.01434 15M12 19C14.2282 19 15.9048 18.1725 17.1321 17.1321M9.51896 3.86222C10.2008 3.32235 11.0628 3 12 3C14.2092 3 16 4.79086 16 7V10.3433M3 3L8.00001 8.00001M8.00001 8.00001V11C8.00001 13.2091 9.79087 15 12 15C12.8492 15 13.6365 14.7354 14.2841 14.2841M8.00001 8.00001L14.2841 14.2841M14.2841 14.2841L17.1321 17.1321M17.1321 17.1321L21 21"
+							stroke="currentColor"
+							stroke-width="2"
+							stroke-linecap="round"
+							stroke-linejoin="round" />
+					</svg>
+				</button>
+				<button
+					id="files-btn"
+					class="ib"
+					type="button"
+					title="Files"
+					aria-label="Files">
+					<svg class="i" viewBox="0 0 24 24" fill="none">
+						<path
+							d="M3 6V17C3 18.1046 3.89543 19 5 19H19C20.1046 19 21 18.1046 21 17V9C21 7.89543 20.1046 7 19 7H12.5352C12.2008 7 11.8886 6.8329 11.7031 6.5547L10.5937 4.8906C10.2228 4.3342 9.59834 4 8.92963 4H5C3.89543 4 3 4.89543 3 6Z"
+							stroke="currentColor"
+							stroke-width="2"
+							stroke-linecap="round"
+							stroke-linejoin="round" />
+					</svg>
+				</button>
+				<button
+					id="fs-btn"
+					class="ib"
+					type="button"
+					title="Fullscreen (Ctrl+Alt+F; captures browser shortcuts)"
+					aria-label="Toggle fullscreen">
+					<svg class="i" viewBox="0 0 24 24" fill="none">
+						<path
+							d="M7 5H5C3.89543 5 3 5.89543 3 7V9M17 5H19C20.1046 5 21 5.89543 21 7V9M21 15V17C21 18.1046 20.1046 19 19 19H17M7 19H5C3.89543 19 3 18.1046 3 17V15"
+							stroke="currentColor"
+							stroke-width="2"
+							stroke-linecap="round"
+							stroke-linejoin="round" />
+					</svg>
+				</button>
+			</div>
 		</div>
 		<div id="files" role="dialog" aria-label="Files">
 			<header>

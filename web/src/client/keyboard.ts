@@ -39,6 +39,10 @@ const charKeysym = (cp: number) =>
 		? cp
 		: 0x01000000 + cp;
 
+/** Shift, Control, Caps/Shift Lock, Meta, Alt, Super, Hyper and AltGr. */
+const isModifier = (ks: number) =>
+	(ks >= 0xffe1 && ks <= 0xffee) || ks === 0xfe03;
+
 async function toPng(file: File): Promise<ArrayBuffer> {
 	if (file.type === 'image/png') return file.arrayBuffer();
 	const bmp = await createImageBitmap(file);
@@ -103,10 +107,16 @@ export function setupKeyboard(
 		down.set(code, ks);
 		send(cmd.key(ks, true));
 	};
+	// A key typed while extra-keys modifiers are on gets them held around it.
 	const tap = (ks: number) => {
+		const mods = app.mods.active();
+		for (const m of mods) send(cmd.key(m, true));
 		send(cmd.key(ks, true));
 		send(cmd.key(ks, false));
+		for (let i = mods.length - 1; i >= 0; i--) send(cmd.key(mods[i], false));
+		if (mods.length) app.mods.consume();
 	};
+
 	function release(code: string) {
 		const ks = down.get(code);
 		if (ks === undefined) return;
@@ -141,6 +151,11 @@ export function setupKeyboard(
 		const held = down.get(e.code);
 		if (e.repeat && held !== undefined) {
 			send(cmd.key(held, true));
+			return;
+		}
+		// Sticky modifiers from the extra-keys bar (iOS's keyboard sends real keydowns).
+		if (!isModifier(ks) && app.mods.active().length) {
+			tap(ks);
 			return;
 		}
 		press(e.code, ks);

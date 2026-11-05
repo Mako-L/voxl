@@ -2,11 +2,16 @@
 import { cmd } from '../protocol';
 import type { App } from './app';
 import { createTouch } from './touch';
+import type { Viewport } from './viewport';
 
 /** DOM button -> X button (left, middle, right, back, forward). */
 const BUTTONS = [1, 2, 3, 8, 9];
 
-export function setupPointer(app: App, onInteract: () => void) {
+export function setupPointer(
+	app: App,
+	viewport: Viewport,
+	onInteract: () => void
+) {
 	const { surface, send } = app;
 
 	function toDesk(p: { clientX: number; clientY: number }): [number, number] {
@@ -51,8 +56,18 @@ export function setupPointer(app: App, onInteract: () => void) {
 
 	const touch = createTouch(app, {
 		moveTo: (x, y) => move({ clientX: x, clientY: y }, true),
+		// A tap is where the viewer will type: keep it in view above the keyboard.
+		tapAt: (x, y) => viewport.setFocus(...toDesk({ clientX: x, clientY: y })),
 		queueScroll,
 		deskPerPx,
+		zoomAt: viewport.zoomAt,
+		panBy: viewport.panBy,
+		zoomed: () => viewport.zoom() > 1.001,
+	});
+	// The page itself never scrolls or zooms under the fingers, and taps on the desktop
+	// don't move focus off the keyboard's textarea (which would close the keyboard).
+	surface.addEventListener('touchstart', (e) => e.preventDefault(), {
+		passive: false,
 	});
 
 	surface.addEventListener('pointermove', (e) => {
@@ -68,6 +83,7 @@ export function setupPointer(app: App, onInteract: () => void) {
 		}
 		app.kbd.focus({ preventScroll: true });
 		move(e);
+		viewport.setFocus(...toDesk(e));
 		try {
 			surface.setPointerCapture(e.pointerId);
 		} catch {}
@@ -91,6 +107,12 @@ export function setupPointer(app: App, onInteract: () => void) {
 		'wheel',
 		(e) => {
 			e.preventDefault();
+			// A trackpad pinch arrives as a wheel event with ctrlKey and fractional
+			// deltas: zoom the view. (A real Ctrl+wheel, whole steps, goes to the desktop.)
+			if (e.ctrlKey && e.deltaMode === 0 && !Number.isInteger(e.deltaY)) {
+				viewport.zoomAt(Math.exp(-e.deltaY / 100), e.clientX, e.clientY);
+				return;
+			}
 			move(e);
 			const k =
 				(e.deltaMode === 1 ? 40 : e.deltaMode === 2 ? 800 : 1) * deskPerPx();

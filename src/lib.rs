@@ -190,6 +190,18 @@ async fn serve(a: HashMap<String, String>) {
     // --enable-resize (as in selkies): clients resize the desktop to their window. Not
     // for read-only viewers: a new size changes the desktop for everyone.
     let enable_resize = truthy(a.get("enable-resize"), false);
+    // With --app the stream is one window's size; resizing a display wouldn't fit it.
+    #[cfg(target_os = "macos")]
+    let enable_resize = if enable_resize && mac::app_target().is_some() {
+        log::warn!("--enable-resize is ignored with --app: the stream follows the window's size");
+        false
+    } else {
+        enable_resize
+    };
+    #[cfg(not(target_os = "macos"))]
+    if a.contains_key("app") {
+        log::warn!("--app is only supported on macOS for now; streaming the whole desktop");
+    }
     if enable_resize && read_only {
         log::warn!("--enable-resize is ignored with --read-only: viewers can't resize the desktop");
     }

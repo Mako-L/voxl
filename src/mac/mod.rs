@@ -8,6 +8,11 @@
 //! - audio: system audio from ScreenCaptureKit
 //! - screen: dynamic resolution by switching display modes
 //! - mic: browser microphone played into a loopback output device
+//!
+//! With `--app` (an app's name or bundle ID, such as `Simulator`), one window of that
+//! app is streamed instead of the whole display: it is captured even while other
+//! windows cover it, input is mapped into it, and the app is brought to the front
+//! when a viewer clicks or types.
 
 pub mod audio;
 pub mod capture;
@@ -22,14 +27,17 @@ use ffi::*;
 use parking_lot::Mutex;
 use std::collections::HashMap;
 
-/// The captured display and how its points map to the desktop pixels voxl streams.
+/// The captured display (or window) and how its points map to the desktop pixels
+/// voxl streams.
 #[derive(Clone, Copy, Debug)]
 pub struct Geometry {
     pub display: u32,
-    /// Display bounds in global points.
+    /// Display (or, with --app, window) bounds in global points.
     pub bounds: CGRect,
     /// Streamed size in pixels.
     pub width: u32,
+    /// With --app: the streamed window's process, raised before input reaches it.
+    pub pid: Option<i32>,
 }
 
 impl Geometry {
@@ -42,8 +50,18 @@ impl Geometry {
 /// Set by the capturer whenever it (re)starts; read by input to map coordinates.
 pub static GEOMETRY: Mutex<Option<Geometry>> = Mutex::new(None);
 
+/// `--app` and `--window-title`: which application window to stream.
+#[derive(Clone, Debug)]
+pub struct AppTarget {
+    /// App name or bundle ID, matched case-insensitively (exactly, else as a substring).
+    pub query: String,
+    /// Only windows whose title contains this (case-insensitive).
+    pub title: Option<String>,
+}
+
 struct Settings {
     display: u32,
+    app: Option<AppTarget>,
     /// Fixed pixels per point (--capture-scale), or None for automatic.
     scale: Option<f64>,
     max_pixels: f64,
@@ -52,6 +70,7 @@ struct Settings {
 
 static SETTINGS: Mutex<Settings> = Mutex::new(Settings {
     display: 0,
+    app: None,
     scale: None,
     max_pixels: 2560.0 * 1600.0,
     fps: 60,
@@ -60,9 +79,21 @@ static SETTINGS: Mutex<Settings> = Mutex::new(Settings {
 /// Reads the macOS options and checks the privacy permissions voxl needs.
 pub fn init(a: &HashMap<String, String>) {
     let display = pick_display(a.get("display").map(|s| s.as_str()));
+    let app = a
+        .get("app")
+        .map(|q| q.trim().to_string())
+        .filter(|q| !q.is_empty())
+        .map(|query| AppTarget {
+            query,
+            title: a
+                .get("window-title")
+                .map(|t| t.trim().to_lowercase())
+                .filter(|t| !t.is_empty()),
+        });
     {
         let mut s = SETTINGS.lock();
         s.display = display;
+        s.app = app.clone();
         s.scale = a
             .get("capture-scale")
             .and_then(|v| v.parse().ok())
@@ -93,6 +124,39 @@ pub fn init(a: &HashMap<String, String>) {
                  terminal running it) in System Settings > Privacy & Security > Accessibility"
             );
         }
+    }
+    if let Some(t) = &app {
+        // Size the stream for the window: Retina pixels unless that busts the budget.
+        match find_window(t) {
+            Ok(w) => {
+                let d = display_of(&w.frame).unwrap_or(display);
+                let mut s = SETTINGS.lock();
+                if s.scale.is_none() {
+                    s.scale = Some(auto_scale(
+                        w.frame.size.width,
+                        w.frame.size.height,
+                        native_scale(d),
+                        s.max_pixels,
+                    ));
+                }
+                drop(s);
+                let (pw, ph) = size_for(w.frame.size.width, w.frame.size.height);
+                log::info!(
+                    "streaming the window \"{}\" of {} ({}, pid {}): {}x{} points, {pw}x{ph} pixels",
+                    w.title,
+                    w.app,
+                    w.bundle,
+                    w.pid,
+                    w.frame.size.width,
+                    w.frame.size.height,
+                );
+            }
+            Err(e) => {
+                log::error!("--app={}: {e}", t.query);
+                std::process::exit(1);
+            }
+        }
+        return;
     }
     {
         let b = unsafe { CGDisplayBounds(display) };
@@ -155,6 +219,120 @@ pub fn active_displays() -> Vec<u32> {
 
 pub fn display() -> u32 {
     SETTINGS.lock().display
+}
+
+/// `--app`, when one app's window is streamed instead of a display.
+pub fn app_target() -> Option<AppTarget> {
+    SETTINGS.lock().app.clone()
+}
+
+fn matches(t: &AppTarget, w: &stream::WindowInfo, exact: bool) -> bool {
+    let q = t.query.to_lowercase();
+    let (app, bundle) = (w.app.to_lowercase(), w.bundle.to_lowercase());
+    let app_ok = if exact {
+        app == q || bundle == q
+    } else {
+        app.contains(&q) || bundle.contains(&q)
+    };
+    app_ok
+        && t.title
+            .as_ref()
+            .is_none_or(|f| w.title.to_lowercase().contains(f.as_str()))
+}
+
+/// The window `--app` (and `--window-title`) picks: an on-screen window of an app
+/// whose name or bundle ID matches exactly (else contains the query), the largest if
+/// the app has several.
+pub fn find_window(t: &AppTarget) -> Result<stream::WindowInfo, String> {
+    let all = stream::windows()?;
+    let usable = |w: &&stream::WindowInfo| {
+        w.on_screen && w.frame.size.width >= 40.0 && w.frame.size.height >= 40.0
+    };
+    let area = |w: &stream::WindowInfo| w.frame.size.width * w.frame.size.height;
+    let pick = |exact: bool| {
+        all.iter()
+            .filter(usable)
+            .filter(|w| matches(t, w, exact))
+            .max_by(|a, b| area(a).total_cmp(&area(b)))
+            .cloned()
+    };
+    if let Some(w) = pick(true).or_else(|| pick(false)) {
+        return Ok(w);
+    }
+    let mut names: Vec<String> = all
+        .iter()
+        .filter(usable)
+        .map(|w| format!("{} ({})", w.app, w.bundle))
+        .collect();
+    names.sort();
+    names.dedup();
+    Err(format!(
+        "no on-screen window matches{}; apps with windows: {}",
+        t.title
+            .as_ref()
+            .map(|f| format!(" (with \"{f}\" in its title)"))
+            .unwrap_or_default(),
+        names.join(", ")
+    ))
+}
+
+/// Current bounds (global points) of a window, or None once it is gone.
+pub fn window_bounds(id: u32) -> Option<CGRect> {
+    unsafe {
+        let list = CGWindowListCopyWindowInfo(kCGWindowListOptionIncludingWindow, id);
+        if list.is_null() {
+            return None;
+        }
+        let mut out = None;
+        for i in 0..CFArrayGetCount(list) {
+            let d = CFArrayGetValueAtIndex(list, i);
+            let mut n = 0i64;
+            let num = CFDictionaryGetValue(d, kCGWindowNumber);
+            if num.is_null()
+                || !CFNumberGetValue(num, kCFNumberSInt64Type, &mut n as *mut i64 as *mut _)
+                || n as u32 != id
+            {
+                continue;
+            }
+            let b = CFDictionaryGetValue(d, kCGWindowBounds);
+            let mut r = CGRect::default();
+            if !b.is_null() && CGRectMakeWithDictionaryRepresentation(b, &mut r) {
+                out = Some(r);
+            }
+        }
+        CFRelease(list as CFTypeRef);
+        out
+    }
+}
+
+/// The active display that holds the middle of `r`.
+pub fn display_of(r: &CGRect) -> Option<u32> {
+    let (cx, cy) = (
+        r.origin.x + r.size.width / 2.0,
+        r.origin.y + r.size.height / 2.0,
+    );
+    active_displays().into_iter().find(|&id| {
+        let b = unsafe { CGDisplayBounds(id) };
+        cx >= b.origin.x
+            && cx < b.origin.x + b.size.width
+            && cy >= b.origin.y
+            && cy < b.origin.y + b.size.height
+    })
+}
+
+/// With --app: bring the streamed app to the front, so clicks and keys reach it and
+/// not a window covering it. Returns whether it had to be raised.
+pub fn raise_app(pid: i32) -> bool {
+    use objc2_app_kit::{NSApplicationActivationOptions, NSRunningApplication};
+    let Some(app) = NSRunningApplication::runningApplicationWithProcessIdentifier(pid) else {
+        return false;
+    };
+    if app.isActive() {
+        return false;
+    }
+    #[allow(deprecated)]
+    app.activateWithOptions(NSApplicationActivationOptions::ActivateIgnoringOtherApps);
+    true
 }
 
 pub fn fps() -> u32 {

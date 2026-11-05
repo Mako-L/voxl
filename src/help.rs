@@ -66,6 +66,12 @@ const DESKTOP: &str = "
 Desktop (this Mac's screen):
   --display                     display to stream: an index (0 is the main
                                 display) or a display ID
+  --app                         stream one app's window instead of a display:
+                                its name or bundle ID (e.g. Simulator,
+                                com.apple.iphonesimulator); captured even when
+                                covered, raised when a viewer clicks or types
+  --window-title                with --app: only windows whose title contains
+                                this (e.g. \"iPhone 17\" for one simulator)
   --capture-scale               streamed pixels per point (default: native,
                                 within the budget)
   --max-capture-pixels          pixel budget for the automatic scale

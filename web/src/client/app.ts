@@ -22,6 +22,8 @@ export interface App {
 	desk: { w: number; h: number };
 	/** On-screen CSS pixels per desktop pixel. */
 	view: { scale: number };
+	/** Sticky modifiers from the extra-keys bar, held around the next key. */
+	mods: { active(): number[]; consume(): void };
 }
 
 export function el<T extends HTMLElement = HTMLElement>(id: string): T {

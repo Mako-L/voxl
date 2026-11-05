@@ -177,7 +177,7 @@ pub fn spawn(_device: String, bitrate: i32, hub: Arc<Hub>) {
                 };
                 // Audio rides on a display stream; keep its video as small and rare as possible.
                 let s = stream::start(
-                    super::display(),
+                    stream::Source::Display(super::display()),
                     "audio",
                     &[OutputType::Audio],
                     |cfg| unsafe {

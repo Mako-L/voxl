@@ -185,6 +185,21 @@ impl Injector {
         }
     }
 
+    /// With --app: bring the streamed app to the front first, so the click or key goes
+    /// to it and not to whatever covers its window.
+    fn raise_app(&self) {
+        let pid = super::GEOMETRY.lock().and_then(|g| g.pid);
+        if let Some(pid) = pid {
+            if super::raise_app(pid) {
+                // Activation is asynchronous; give the window server a moment to
+                // reorder windows before the event lands.
+                std::thread::sleep(Duration::from_millis(60));
+                // Re-send the pointer position so the click hits the raised window.
+                self.mouse(kCGEventMouseMoved, 0);
+            }
+        }
+    }
+
     fn to_point(&self, x: i32, y: i32) -> CGPoint {
         let Some(g) = *super::GEOMETRY.lock() else {
             return CGPoint::default();
@@ -263,6 +278,7 @@ impl Injector {
                 }
                 self.buttons[b] = down;
                 if down {
+                    self.raise_app();
                     // macOS wants the click count on the events for double/triple clicks.
                     let (t, p, last) = self.last_click;
                     let near = (p.x - self.pos.x).abs() < 4.0 && (p.y - self.pos.y).abs() < 4.0;
@@ -327,7 +343,12 @@ impl Injector {
                 }
                 self.post(e);
             }
-            InputEvent::Key { keysym, down } => self.key(keysym, down),
+            InputEvent::Key { keysym, down } => {
+                if down {
+                    self.raise_app();
+                }
+                self.key(keysym, down)
+            }
             InputEvent::Clipboard(content) => {
                 if let Some(c) = &self.clipboard {
                     c.set_blocking(content);

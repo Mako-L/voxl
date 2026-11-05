@@ -17,6 +17,27 @@ DISPLAY=:1 voxl             # streams display :1 and prints a link that signs yo
 Open the link it prints. On a Mac or a Windows PC, `voxl` streams that machine's own
 screen instead; see [macOS](#macos) and [Windows](#windows).
 
+## Phones, tablets and the viewer
+
+The web client works as a remote-control app on phones and tablets:
+
+- **Touch**: tap to click, drag to drag, long-press to right-click, two fingers to
+  scroll, **pinch to zoom** (the fingers pan the zoomed view too). While zoomed in, a
+  two-finger drag pans the view first and scrolls the desktop once it reaches an edge.
+- **Keyboard**: the keyboard button opens the phone's keyboard. The desktop keeps its
+  size and the view moves so the spot you last tapped (the field you're typing in)
+  stays visible above the keyboard.
+- **Extra keys**: a bar above the keyboard with Esc, Tab, Ctrl, Alt/⌥, ⌘/Win, Shift,
+  arrows, Home/End, Page Up/Down, Del, F1–F12 and `/ - ~ | \``. Modifiers are sticky:
+tap once for the next key (also a key typed on the phone's keyboard, so Ctrl then
+`c` sends Ctrl+C), twice to lock, again to release. Keys repeat while held. The
+  extra-keys button in the toolbar keeps the bar up without the keyboard.
+- **Zoom** with a mouse: the toolbar's zoom buttons, a trackpad pinch, or
+  Ctrl+Alt+`=` / `-` / `0`. A zoomed view follows the mouse to its edges.
+- **Fullscreen**: the toolbar button or Ctrl+Alt+F. On an iPhone, which doesn't
+  offer fullscreen to web pages, add the page to the Home Screen (Share → Add to Home
+  Screen) and open it from there to get it full screen.
+
 ## Benchmarks
 
 https://github.com/user-attachments/assets/acdf3f31-64fc-4acf-b5c5-ff173d7100a8
@@ -112,39 +133,40 @@ Start Xvfb with `-shmem` for zero-copy capture, and use the patched Xvfb
 scrolling. voxl accepts selkies' command-line flags; other selkies flags are ignored.
 `voxl --help` lists every flag with its default, and `voxl --version` prints the version.
 
-| Flag                                                           | Default                            |                                                                                                                   |
-| -------------------------------------------------------------- | ---------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `--addr`, `--port`                                             | `0.0.0.0`, `6901`                  | listen address                                                                                                    |
-| `--title`                                                      | `Voxl Computer Stream`             | the page's title: the browser tab, and the app's name if a viewer installs it                                     |
-| `--favicon`                                                    | voxl's icon                        | the tab's icon: an `.ico`, `.png`, `.gif`, `.webp` or `.svg` file                                                 |
-| `--enable-basic-auth`                                          | `true`                             | ask for a password (see [Login](#login)); `false` serves without one                                              |
-| `--basic-auth-password`                                        | `VOXL_PASSWORD`, else made up      | the password                                                                                                      |
-| `--basic-auth-user`                                            | any                                | the user name a browser's sign-in has to give                                                                     |
-| `--framerate`                                                  | `60`                               | max frames per second (`60-60` style ranges accepted)                                                             |
-| `--preset`                                                     | `ultrafast`                        | x264 preset                                                                                                       |
-| `--encoder-threads`                                            | `min(4, ncpu/4)`                   | x264 sliced threads                                                                                               |
-| `--crf`                                                        | `24`                               | base quality                                                                                                      |
-| `--max-kbps` / `--video-bitrate`                               | `30000`                            | adaptive bitrate ceiling                                                                                          |
-| `--min-kbps`                                                   | `2000`                             | adaptive bitrate floor                                                                                            |
-| `--paintover-crf`, `--paintover-burst`, `--paintover-delay-ms` | `16`, `3`, `150`                   | sharpening when the screen goes still                                                                             |
-| `--enable-clipboard`                                           | `true`                             | `true`, `in`, `out` or `false`                                                                                    |
-| `--audio-enabled`, `--audio-device-name`, `--audio-bitrate`    | `true`, `output.monitor`, `128000` | desktop audio                                                                                                     |
-| `--enable-resize`, `--resize-scale`                            | `false`, `1.5`                     | desktop follows the viewer's window; desktop pixels per CSS pixel                                                 |
-| `--microphone-enabled`, `--microphone-fifo`                    | `false`, `/tmp/voxl-mic.fifo`      | browser microphone into the FIFO a PulseAudio pipe source reads                                                   |
-| `--round-corners`                                              | `0` (off)                          | corner radius in pixels for top-level windows                                                                     |
-| `--round-windows`                                              | none                               | `title:radius,...` rounds windows with that title, docks included                                                 |
-| `--adaptive-threads`                                           | `false`                            | encode on one thread, fanning out only under sustained heavy motion                                               |
-| `--stripes`                                                    | `1`                                | encode the screen as N independent horizontal streams (experimental)                                              |
-| `--scroll-px-per-notch`                                        | `180`                              | desktop pixels one wheel notch scrolls (calibrates smooth scrolling)                                              |
-| `--file-transfers`                                             | `upload,download`                  | `upload`, `download`, both, or `none`                                                                             |
-| `--read-only`                                                  | `false`                            | viewers only watch: input, clipboard writes, the microphone, uploads and resizing (`--enable-resize`) are refused |
-| `--allowed-hosts`                                              | none                               | host names to answer for besides IP addresses and `localhost` (`.example.com` covers subdomains, `*` any)         |
-| `--allowed-origins`                                            | none                               | other sites whose pages may connect, such as a page that embeds voxl's client (`*` any site)                      |
-| `--files-root`                                                 | `$HOME`                            | folder the Files panel can see; nothing outside it is reachable                                                   |
-| `--upload-dir`                                                 | `Downloads`                        | folder (under the root) the panel opens and uploads into; created on first upload                                 |
-| `--max-upload-mb`                                              | `0` (no limit)                     | largest accepted upload                                                                                           |
-| `--max-record-seconds`                                         | `300`                              | longest recording (`/record`)                                                                                     |
-| `--convert-threads`, `--coalesce-us`                           | `4`, `0`                           | tuning                                                                                                            |
+| Flag                                                           | Default                            |                                                                                                                                                |
+| -------------------------------------------------------------- | ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--addr`, `--port`                                             | `0.0.0.0`, `6901`                  | listen address                                                                                                                                 |
+| `--title`                                                      | `Voxl Computer Stream`             | the page's title: the browser tab, and the app's name if a viewer installs it                                                                  |
+| `--favicon`                                                    | voxl's icon                        | the tab's icon: an `.ico`, `.png`, `.gif`, `.webp` or `.svg` file                                                                              |
+| `--enable-basic-auth`                                          | `true`                             | ask for a password (see [Login](#login)); `false` serves without one                                                                           |
+| `--basic-auth-password`                                        | `VOXL_PASSWORD`, else made up      | the password                                                                                                                                   |
+| `--basic-auth-user`                                            | any                                | the user name a browser's sign-in has to give                                                                                                  |
+| `--framerate`                                                  | `60`                               | max frames per second (`60-60` style ranges accepted)                                                                                          |
+| `--preset`                                                     | `ultrafast`                        | x264 preset                                                                                                                                    |
+| `--encoder-threads`                                            | `min(4, ncpu/4)`                   | x264 sliced threads                                                                                                                            |
+| `--crf`                                                        | `24`                               | base quality                                                                                                                                   |
+| `--max-kbps` / `--video-bitrate`                               | `30000`                            | adaptive bitrate ceiling                                                                                                                       |
+| `--min-kbps`                                                   | `2000`                             | adaptive bitrate floor                                                                                                                         |
+| `--paintover-crf`, `--paintover-burst`, `--paintover-delay-ms` | `16`, `3`, `150`                   | sharpening when the screen goes still                                                                                                          |
+| `--enable-clipboard`                                           | `true`                             | `true`, `in`, `out` or `false`                                                                                                                 |
+| `--audio-enabled`, `--audio-device-name`, `--audio-bitrate`    | `true`, `output.monitor`, `128000` | desktop audio                                                                                                                                  |
+| `--enable-resize`, `--resize-scale`                            | `false`, `1.5`                     | desktop follows the viewer's window; desktop pixels per CSS pixel                                                                              |
+| `--microphone-enabled`, `--microphone-fifo`                    | `false`, `/tmp/voxl-mic.fifo`      | browser microphone into the FIFO a PulseAudio pipe source reads                                                                                |
+| `--app`, `--window-title`                                      | none                               | macOS: stream one app's window (name or bundle ID, e.g. `Simulator`) instead of the display; see [Streaming one app](#streaming-one-app---app) |
+| `--round-corners`                                              | `0` (off)                          | corner radius in pixels for top-level windows                                                                                                  |
+| `--round-windows`                                              | none                               | `title:radius,...` rounds windows with that title, docks included                                                                              |
+| `--adaptive-threads`                                           | `false`                            | encode on one thread, fanning out only under sustained heavy motion                                                                            |
+| `--stripes`                                                    | `1`                                | encode the screen as N independent horizontal streams (experimental)                                                                           |
+| `--scroll-px-per-notch`                                        | `180`                              | desktop pixels one wheel notch scrolls (calibrates smooth scrolling)                                                                           |
+| `--file-transfers`                                             | `upload,download`                  | `upload`, `download`, both, or `none`                                                                                                          |
+| `--read-only`                                                  | `false`                            | viewers only watch: input, clipboard writes, the microphone, uploads and resizing (`--enable-resize`) are refused                              |
+| `--allowed-hosts`                                              | none                               | host names to answer for besides IP addresses and `localhost` (`.example.com` covers subdomains, `*` any)                                      |
+| `--allowed-origins`                                            | none                               | other sites whose pages may connect, such as a page that embeds voxl's client (`*` any site)                                                   |
+| `--files-root`                                                 | `$HOME`                            | folder the Files panel can see; nothing outside it is reachable                                                                                |
+| `--upload-dir`                                                 | `Downloads`                        | folder (under the root) the panel opens and uploads into; created on first upload                                                              |
+| `--max-upload-mb`                                              | `0` (no limit)                     | largest accepted upload                                                                                                                        |
+| `--max-record-seconds`                                         | `300`                              | longest recording (`/record`)                                                                                                                  |
+| `--convert-threads`, `--coalesce-us`                           | `4`, `0`                           | tuning                                                                                                                                         |
 
 ### Login
 
@@ -274,6 +296,25 @@ from "CABLE Output".
 The other flags work as on Linux; `--microphone-fifo` and the rounded-corner flags don't
 apply. Dynamic resolution picks the largest display mode that fits the viewer's window,
 and Windows restores the original mode when voxl exits.
+
+### Streaming one app (`--app`)
+
+`--app` streams a single application window instead of the whole display, for
+example the iOS Simulator:
+
+```sh
+voxl --app=Simulator                                # the Simulator's (largest) window
+voxl --app=com.apple.iphonesimulator --window-title="iPhone 17"   # one device of several
+voxl --app=Safari --capture-scale=2                  # sharper on a non-Retina display
+```
+
+The value is an app name or bundle ID (case-insensitive; an exact match wins, else
+a substring). The stream is the window's size and follows it: moving the window
+keeps input lined up, resizing it restarts the stream at the new size, and if the
+window closes (the Simulator switching devices, the app relaunching) voxl waits for a
+new one. The window is captured even while other windows cover it, and the app is
+brought to the front when a viewer clicks or types, so input reaches it.
+`--enable-resize` doesn't apply in this mode.
 
 ## FAQ
 
