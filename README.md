@@ -326,8 +326,24 @@ screenshot, shake and rotate. On a phone or tablet the simulated iPhone also fol
 the viewer's orientation: turn your phone sideways (or fold/unfold it) and the
 Simulator rotates to match; the panel turns this off. The buttons press the
 Simulator's own menu items, so voxl needs the Accessibility permission it already
-asks for. Browsers don't hand web pages the phone's physical volume keys, so volume
-is on-screen buttons.
+asks for. Browsers don't hand web pages the phone's physical buttons, so for those
+there is a small Android app.
+
+#### Android app (`android/`)
+
+The same page full screen, with the phone itself as the controller: its **volume
+keys** press the iPhone's volume buttons (the phone's own volume doesn't change), the
+camera key takes a device screenshot, **rotating** the phone rotates the iPhone, and
+**folding** a foldable shut locks the iPhone, opening it wakes it (from the hinge
+sensor). It builds with the Android SDK alone, no Gradle:
+
+```sh
+android/build.sh                       # -> android/build/voxl.apk
+adb install -r android/build/voxl.apk
+adb shell am start -n dev.voxl.remote/.MainActivity -d 'https://host:port/?token=...'
+```
+
+Without `-d` it asks for the link on first launch and remembers it.
 
 ## FAQ
 

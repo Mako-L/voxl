@@ -49,6 +49,9 @@ function orientationAction(): string | null {
 	return null;
 }
 
+/** On a Fold, the big inner screen (unfolded) rather than the cover screen. */
+const large = () => Math.min(screen.width, screen.height) >= 600;
+
 export function setupDevice(app: App) {
 	const btn = el<HTMLButtonElement>('dev-btn');
 	const panel = el('devpanel');
@@ -123,6 +126,38 @@ export function setupDevice(app: App) {
 		clearTimeout(t);
 		t = setTimeout(follow, 300);
 	});
+
+	// Folding the phone locks the simulated iPhone (like pressing its side button);
+	// unfolding wakes it again. A fold shows up as the screen shrinking to the cover
+	// display's size. Only a wake for a lock the fold sent, so they can't get out of
+	// step with the iPhone's own state.
+	let wasLarge = large();
+	let lockedByFold = false;
+	function onFold() {
+		const now = large();
+		if (now === wasLarge) return;
+		wasLarge = now;
+		// The Android app watches the hinge itself, even in the background.
+		if (!on || !touch || app.readOnly || / VoxlApp\//.test(navigator.userAgent))
+			return;
+		if (!now) {
+			send('lock');
+			lockedByFold = true;
+		} else if (lockedByFold) {
+			send('lock');
+			lockedByFold = false;
+		}
+	}
+	window.addEventListener('resize', onFold);
+	screen.orientation?.addEventListener('change', onFold);
+
+	// For the Android app (android/): the phone's own hardware keys (volume, camera)
+	// call this.
+	(window as Window & { voxlDevice?: (a: string) => void }).voxlDevice = (
+		a
+	) => {
+		if (on && !app.readOnly) send(a);
+	};
 
 	render();
 	return {

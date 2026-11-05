@@ -185,6 +185,7 @@ pub fn device_action(action: &str) {
         log::debug!("unknown device action {action:?}");
         return;
     };
+    log::info!("device action: {}", path.join(" > "));
     // Accessibility calls can block for a while; keep them off the socket task.
     std::thread::spawn(move || {
         if let Err(e) = press_menu(pid, &path) {
