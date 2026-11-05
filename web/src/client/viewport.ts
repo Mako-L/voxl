@@ -14,6 +14,12 @@ const FOCUS_MARGIN = 48;
 /** Mouse within this many CSS px of an edge pans a zoomed view that way. */
 const EDGE_PX = 28;
 const EDGE_SPEED = 14;
+/** Auto: fill when that cuts off at most this much (as a ratio of sizes), else fit. */
+const AUTO_FILL_MAX = 1.15;
+
+/** fit: all of it, with bars; fill: edge to edge, edges cut off; auto: fill when the
+ * shapes are close, fit when they aren't. */
+export type FitMode = 'fit' | 'fill' | 'auto';
 
 const gcd = (a: number, b: number): number => (b ? gcd(b, a % b) : a);
 
@@ -24,9 +30,10 @@ export interface Viewport {
 	/** Zoom around the middle of the visible area. */
 	zoomBy(factor: number): void;
 	resetZoom(): void;
-	/** Fill: cover the whole window (edges may be cut off) instead of fitting inside it. */
-	setFill(on: boolean): void;
-	fill(): boolean;
+	setMode(m: FitMode): void;
+	mode(): FitMode;
+	/** Whether the view is filling (edge to edge) right now. */
+	filling(): boolean;
 	/** Whether the desktop is bigger than the visible area (so it can be panned). */
 	canPan(): boolean;
 	/** Pan by CSS px; returns what couldn't be panned (the view hit an edge). */
@@ -54,6 +61,7 @@ export function createViewport(
 	// Surface's top left relative to the visible area's, in CSS px.
 	let pan = { x: 0, y: 0 };
 	let barH = 0;
+	let mode: FitMode = 'fit';
 	let fill = false;
 	let big = false;
 	// Visible height without the keyboard (the layout viewport's).
@@ -132,9 +140,11 @@ export function createViewport(
 		if (!dw) return;
 		// Fit into the area without the keyboard, so it popping up doesn't shrink the desktop.
 		const fitH = kbOpen ? Math.max(a.h, fullH) : a.h;
-		const fit =
-			(fill ? Math.max(a.w / dw, fitH / dh) : Math.min(a.w / dw, fitH / dh)) ||
-			1;
+		const inside = Math.min(a.w / dw, fitH / dh),
+			cover = Math.max(a.w / dw, fitH / dh);
+		fill =
+			mode === 'fill' || (mode === 'auto' && cover <= inside * AUTO_FILL_MAX);
+		const fit = (fill ? cover : inside) || 1;
 		const dpr = window.devicePixelRatio || 1;
 		// Snap the height so every stripe boundary lands on a whole device pixel;
 		// otherwise the stacked stripe layers show hairline seams.
@@ -240,9 +250,9 @@ export function createViewport(
 			const a = area();
 			zoomAt(factor, a.x + a.w / 2, a.y + a.h / 2);
 		},
-		setFill(on) {
-			if (on === fill) return;
-			fill = on;
+		setMode(m) {
+			if (m === mode) return;
+			mode = m;
 			zoom = 1;
 			// Centred: the parts cut off are shared out evenly.
 			pan = { x: -1e6, y: -1e6 };
@@ -253,7 +263,8 @@ export function createViewport(
 			};
 			layout();
 		},
-		fill: () => fill,
+		mode: () => mode,
+		filling: () => fill,
 		canPan: () => big,
 		resetZoom() {
 			zoom = 1;

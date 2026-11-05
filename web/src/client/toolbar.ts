@@ -2,7 +2,7 @@
 // on-screen keyboard, extra keys, zoom, files, microphone and fullscreen buttons.
 import type { App } from './app';
 import { el } from './app';
-import type { Viewport } from './viewport';
+import type { FitMode, Viewport } from './viewport';
 
 const ZOOM_STEP = 1.25;
 
@@ -15,15 +15,24 @@ interface WebkitElement {
 	webkitRequestFullscreen?: () => void;
 }
 
-/** Fill by default on a phone or tablet streaming a simulated phone, unless the viewer
- * chose otherwise before. */
+const MODE_KEY = 'voxl.fitMode';
+const MODES: FitMode[] = ['fill', 'fit', 'auto'];
+
+/** Fill by default on a phone or tablet streaming a simulated phone, unless the
+ * viewer chose otherwise before. */
 export function defaultFill(viewport: Viewport, sim: boolean) {
 	let saved: string | null = null;
 	try {
-		saved = localStorage.getItem('voxl.fill');
+		saved = localStorage.getItem(MODE_KEY);
 	} catch {}
 	const touch = matchMedia('(pointer: coarse)').matches;
-	viewport.setFill(saved !== null ? saved === '1' : touch && sim);
+	viewport.setMode(
+		MODES.includes(saved as FitMode)
+			? (saved as FitMode)
+			: touch && sim
+				? 'fill'
+				: 'fit'
+	);
 }
 
 export function setupToolbar(app: App, viewport: Viewport) {
@@ -75,21 +84,29 @@ export function setupToolbar(app: App, viewport: Viewport) {
 	zoomIn.addEventListener('click', () => viewport.zoomBy(ZOOM_STEP));
 	zoomOut.addEventListener('click', () => viewport.zoomBy(1 / ZOOM_STEP));
 	zoomReset.addEventListener('click', () => viewport.resetZoom());
-	const FILL_KEY = 'voxl.fill';
+	// Cycles Fill -> Fit -> Auto.
 	fillBtn.addEventListener('click', () => {
-		viewport.setFill(!viewport.fill());
+		const m = MODES[(MODES.indexOf(viewport.mode()) + 1) % MODES.length];
+		viewport.setMode(m);
+		flash(
+			m === 'auto'
+				? 'Auto: edge to edge when the shapes are close, else the whole screen'
+				: m === 'fill'
+					? 'Fill: edge to edge (edges cut off)'
+					: 'Fit: the whole screen'
+		);
 		try {
-			localStorage.setItem(FILL_KEY, viewport.fill() ? '1' : '0');
+			localStorage.setItem(MODE_KEY, m);
 		} catch {}
 	});
 	viewport.onChange(() => {
 		const z = viewport.zoom();
 		zoomReset.title = `Fit to window (${Math.round(z * 100)}%)`;
 		zoomOut.disabled = z <= 1.001;
-		fillBtn.classList.toggle('on', viewport.fill());
-		fillBtn.title = viewport.fill()
-			? 'Fit the whole screen in view'
-			: 'Fill the screen edge to edge';
+		const m = viewport.mode();
+		fillBtn.classList.toggle('on', m !== 'fit');
+		fillBtn.dataset.mode = m;
+		fillBtn.title = `View: ${m} (tap for ${MODES[(MODES.indexOf(m) + 1) % MODES.length]})`;
 	});
 
 	let hintTimer: ReturnType<typeof setTimeout> | undefined;
