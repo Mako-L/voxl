@@ -148,6 +148,9 @@ function main() {
 				viewport.layout();
 				extraKeys.refresh();
 				device.setup(!!m.sim);
+				// A simulated phone is shown as just the phone: no zoom, no extra keys.
+				viewport.setZoomable(!m.sim);
+				extraKeys.setEnabled(!m.sim);
 				defaultFill(viewport, !!m.sim);
 				files.setup(m.files);
 				mic.setup(!!m.mic && !app.readOnly);

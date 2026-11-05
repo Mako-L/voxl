@@ -54,6 +54,8 @@ export function setupExtraKeys(app: App, viewport: Viewport) {
 
 	let page = 0;
 	let pinned = false;
+	// Off for a simulated phone, which has its own keyboard and no use for these.
+	let enabled = true;
 	// Sticky modifiers: keysym -> once (next key) or locked.
 	const mods = new Map<number, 'once' | 'lock'>();
 	const modButtons = new Map<number, HTMLButtonElement[]>();
@@ -263,7 +265,7 @@ export function setupExtraKeys(app: App, viewport: Viewport) {
 	let shown = false;
 	function update() {
 		const soft = document.activeElement === kbd && !!kbd.dataset.soft;
-		const show = touch && !app.readOnly && (soft || pinned);
+		const show = enabled && touch && !app.readOnly && (soft || pinned);
 		if (show !== shown) {
 			shown = show;
 			bar.classList.toggle('show', show);
@@ -288,7 +290,8 @@ export function setupExtraKeys(app: App, viewport: Viewport) {
 	viewport.onChange(() => {
 		// Android's back button closes the keyboard without a blur; the viewport notices.
 		const soft = document.activeElement === kbd && !!kbd.dataset.soft;
-		if (shown !== (touch && !app.readOnly && (soft || pinned))) update();
+		if (shown !== (enabled && touch && !app.readOnly && (soft || pinned)))
+			update();
 	});
 	window.addEventListener('blur', () => {
 		keyUp();
@@ -300,6 +303,14 @@ export function setupExtraKeys(app: App, viewport: Viewport) {
 		/** After the server's hello: labels for a Mac or another desktop. */
 		refresh() {
 			render();
+			update();
+		},
+		setEnabled(on: boolean) {
+			enabled = on;
+			if (!on) {
+				mods.clear();
+				paintMods();
+			}
 			update();
 		},
 		update,

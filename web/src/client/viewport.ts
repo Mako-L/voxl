@@ -30,6 +30,8 @@ export interface Viewport {
 	/** Zoom around the middle of the visible area. */
 	zoomBy(factor: number): void;
 	resetZoom(): void;
+	/** Off: no zooming at all (pinch, wheel, buttons), back to the fitted view. */
+	setZoomable(on: boolean): void;
 	setMode(m: FitMode): void;
 	mode(): FitMode;
 	/** Whether the view is filling (edge to edge) right now. */
@@ -62,6 +64,7 @@ export function createViewport(
 	let pan = { x: 0, y: 0 };
 	let barH = 0;
 	let mode: FitMode = 'fit';
+	let zoomable = true;
 	let fill = false;
 	let big = false;
 	// Visible height without the keyboard (the layout viewport's).
@@ -181,6 +184,7 @@ export function createViewport(
 	function zoomAt(factor: number, cx: number, cy: number) {
 		const a = area();
 		const old = app.view.scale;
+		if (!zoomable) return;
 		const z = Math.min(MAX_ZOOM, Math.max(1, zoom * factor));
 		if (z === zoom || !old) return;
 		// Desktop point under (cx, cy) stays there.
@@ -269,6 +273,14 @@ export function createViewport(
 		resetZoom() {
 			zoom = 1;
 			layout();
+		},
+		setZoomable(on) {
+			if (on === zoomable) return;
+			zoomable = on;
+			if (!on && zoom !== 1) {
+				zoom = 1;
+				layout();
+			}
 		},
 		panBy,
 		setFocus(x, y) {

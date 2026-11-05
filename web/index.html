@@ -255,6 +255,13 @@
 			#tools.read-only #keys-btn {
 				display: none !important;
 			}
+			/* A simulated phone: no zoom and no extra keys, just the phone. */
+			#tools.sim #keys-btn,
+			#tools.sim #zoom-in,
+			#tools.sim #zoom-out,
+			#tools.sim #zoom-reset {
+				display: none !important;
+			}
 			/* While the microphone is live the toolbar stays up as a recording indicator. */
 			#tools.mic-on {
 				opacity: 1;
