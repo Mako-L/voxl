@@ -127,12 +127,10 @@ export function setupDevice(app: App) {
 		t = setTimeout(follow, 300);
 	});
 
-	// Folding the phone locks the simulated iPhone (like pressing its side button);
-	// unfolding wakes it again. A fold shows up as the screen shrinking to the cover
-	// display's size. Only a wake for a lock the fold sent, so they can't get out of
-	// step with the iPhone's own state.
+	// Folding the phone (seen as the screen shrinking to the cover display's size)
+	// folds an iPhone Duo the same way, or locks any other iPhone and wakes it on
+	// unfolding: the server decides from the posture.
 	let wasLarge = large();
-	let lockedByFold = false;
 	function onFold() {
 		const now = large();
 		if (now === wasLarge) return;
@@ -140,13 +138,7 @@ export function setupDevice(app: App) {
 		// The Android app watches the hinge itself, even in the background.
 		if (!on || !touch || app.readOnly || / VoxlApp\//.test(navigator.userAgent))
 			return;
-		if (!now) {
-			send('lock');
-			lockedByFold = true;
-		} else if (lockedByFold) {
-			send('lock');
-			lockedByFold = false;
-		}
+		send(now ? 'posture-open' : 'posture-closed');
 	}
 	window.addEventListener('resize', onFold);
 	screen.orientation?.addEventListener('change', onFold);

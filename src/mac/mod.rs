@@ -245,7 +245,7 @@ pub fn app_target() -> Option<AppTarget> {
 pub fn streams_simulator() -> bool {
     app_target()
         .and_then(|t| find_window(&t).ok())
-        .is_some_and(|w| w.bundle == sim::BUNDLE_ID)
+        .is_some_and(|w| sim::is_simulator(&w.bundle))
 }
 
 /// The part of window `w` to stream, in global points: with `--sim-screen`, the
@@ -263,6 +263,13 @@ pub fn crop_for(t: &AppTarget, w: &stream::WindowInfo) -> CGRect {
 fn matches(t: &AppTarget, w: &stream::WindowInfo, exact: bool) -> bool {
     let q = t.query.to_lowercase();
     let (app, bundle) = (w.app.to_lowercase(), w.bundle.to_lowercase());
+    // Xcode 27 runs simulators in Device Hub; --app=Simulator means either.
+    if q == "simulator" && sim::is_simulator(&w.bundle) {
+        return t
+            .title
+            .as_ref()
+            .is_none_or(|f| w.title.to_lowercase().contains(f.as_str()));
+    }
     let app_ok = if exact {
         app == q || bundle == q
     } else {

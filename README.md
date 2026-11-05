@@ -329,13 +329,27 @@ Simulator's own menu items, so voxl needs the Accessibility permission it alread
 asks for. Browsers don't hand web pages the phone's physical buttons, so for those
 there is a small Android app.
 
+#### Xcode 27: Device Hub and the iPhone Duo
+
+Xcode 27 replaced Simulator.app with Device Hub; `--app=Simulator` streams either
+(`--app="Device Hub"` picks Device Hub when both run, `--window-title` a device). For
+Device Hub voxl lays the window out itself (main window, sidebar hidden, zoomed to
+fit, enlarged on its display, so the device is drawn large), finds the device in the
+captured image, and finds it again after a fold or rotation. Its Home, Screenshot and
+Rotate buttons, volume and orientation work as with the Simulator. The foldable
+**iPhone Duo** (iOS 27.2 runtime build `24B91016s`, a separate download:
+`xcodebuild -downloadPlatform iOS -buildVersion 24B91016s`) follows a foldable
+viewer's hinge: shut, half open and flat press its Closed, Partially Open and Open
+buttons. On any other iPhone, shutting the viewer's phone locks it and opening wakes
+it.
+
 #### Android app (`android/`)
 
 The same page full screen, with the phone itself as the controller: its **volume
 keys** press the iPhone's volume buttons (the phone's own volume doesn't change), the
 camera key takes a device screenshot, **rotating** the phone rotates the iPhone, and
-**folding** a foldable shut locks the iPhone, opening it wakes it (from the hinge
-sensor). It builds with the Android SDK alone, no Gradle:
+**folding** a foldable folds an iPhone Duo the same way (any other iPhone locks when
+shut and wakes when opened), from the hinge sensor. It builds with the Android SDK alone, no Gradle:
 
 ```sh
 android/build.sh                       # -> android/build/voxl.apk

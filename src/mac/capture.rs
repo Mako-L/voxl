@@ -24,6 +24,118 @@ pub static DAMAGE_EVENTS: AtomicU64 = AtomicU64::new(0);
 /// for (the app restarting, the Simulator switching devices) instead of failing.
 static STARTED: AtomicBool = AtomicBool::new(false);
 
+/// (x0, y0, x1, y1) in frame pixels.
+type PixelRect = (usize, usize, usize, usize);
+
+/// Device Hub (Xcode 27) draws the device centred on a plain background inside its
+/// window, and its accessibility frames for the screen aren't in screen coordinates.
+/// So: capture the whole window once and take the bounding box of whatever differs
+/// from the background, between the title bar and the bottom toolbar. Returns it in
+/// global points.
+fn detect_device_rect(w: &stream::WindowInfo) -> Option<CGRect> {
+    let (pw, ph) = super::size_for(w.frame.size.width, w.frame.size.height);
+    let k = pw as f64 / w.frame.size.width.max(1.0);
+    let found: Arc<Mutex<Option<PixelRect>>> = Arc::new(Mutex::new(None));
+    let f2 = found.clone();
+    let on_frame = move |sb: CMSampleBufferRef, ty: OutputType| unsafe {
+        if ty != OutputType::Screen || !CMSampleBufferIsValid(sb) || f2.lock().is_some() {
+            return;
+        }
+        let att = CMSampleBufferGetSampleAttachmentsArray(sb, false);
+        if att.is_null() || CFArrayGetCount(att) == 0 {
+            return;
+        }
+        let info = CFArrayGetValueAtIndex(att, 0);
+        if dict_i64(info, SCStreamFrameInfoStatus as *const _ as *const c_void) != Some(0) {
+            return;
+        }
+        let pb = CMSampleBufferGetImageBuffer(sb);
+        if pb.is_null() {
+            return;
+        }
+        CVPixelBufferLockBaseAddress(pb, kCVPixelBufferLock_ReadOnly);
+        let (w, h) = (CVPixelBufferGetWidth(pb), CVPixelBufferGetHeight(pb));
+        let stride = CVPixelBufferGetBytesPerRowOfPlane(pb, 0);
+        let y = std::slice::from_raw_parts(CVPixelBufferGetBaseAddressOfPlane(pb, 0), stride * h);
+        let at = |x: usize, r: usize| y[r * stride + x] as i32;
+        // Toolbar above, controls (and tips that pop up over them) below; the
+        // background colour from the left margin.
+        let (top, bot) = ((60.0 * k) as usize, h.saturating_sub((110.0 * k) as usize));
+        let bg = at((8.0 * k) as usize, h / 2);
+        let differs = |x: usize, r: usize| (at(x, r) - bg).abs() > 14;
+        let (mut x0, mut x1, mut y0, mut y1) = (usize::MAX, 0, usize::MAX, 0);
+        for r in (top..bot).step_by(2) {
+            let n = (0..w).step_by(2).filter(|&x| differs(x, r)).count();
+            if n * 2 > w / 50 {
+                y0 = y0.min(r);
+                y1 = y1.max(r);
+            }
+        }
+        if y0 < y1 {
+            for x in (0..w).step_by(2) {
+                let n = (y0..=y1).step_by(2).filter(|&r| differs(x, r)).count();
+                if n * 2 > (y1 - y0) / 50 {
+                    x0 = x0.min(x);
+                    x1 = x1.max(x);
+                }
+            }
+        }
+        CVPixelBufferUnlockBaseAddress(pb, kCVPixelBufferLock_ReadOnly);
+        if x0 < x1 && y0 < y1 {
+            *f2.lock() = Some((x0, y0, (x1 + 2).min(w), (y1 + 2).min(h)));
+        }
+    };
+    let fps = 30;
+    let _stream = stream::start(
+        Source::Window(w.id),
+        "locate",
+        &[OutputType::Screen],
+        |cfg| unsafe {
+            cfg.setWidth(pw as usize);
+            cfg.setHeight(ph as usize);
+            cfg.setMinimumFrameInterval(objc2_core_media::CMTime {
+                value: 1,
+                timescale: fps,
+                flags: objc2_core_media::CMTimeFlags::Valid,
+                epoch: 0,
+            });
+            cfg.setPixelFormat(kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange);
+            cfg.setShowsCursor(false);
+            if objc2_foundation::NSObjectProtocol::respondsToSelector(
+                cfg,
+                objc2::sel!(setIgnoreShadowsSingleWindow:),
+            ) {
+                cfg.setIgnoreShadowsSingleWindow(true);
+            }
+        },
+        on_frame,
+    )
+    .ok()?;
+    let t = Instant::now();
+    while found.lock().is_none() && t.elapsed() < Duration::from_secs(3) {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let (x0, y0, x1, y1) = (*found.lock())?;
+    let r = CGRect {
+        origin: CGPoint {
+            x: w.frame.origin.x + x0 as f64 / k,
+            y: w.frame.origin.y + y0 as f64 / k,
+        },
+        size: CGSize {
+            width: (x1 - x0) as f64 / k,
+            height: (y1 - y0) as f64 / k,
+        },
+    };
+    log::info!(
+        "device found in Device Hub's window at {:.0},{:.0} {:.0}x{:.0} points",
+        r.origin.x - w.frame.origin.x,
+        r.origin.y - w.frame.origin.y,
+        r.size.width,
+        r.size.height
+    );
+    Some(r)
+}
+
 /// The window --app streams. At startup a missing window is an error; afterwards
 /// capture waits for one to show up again.
 fn wait_for_window(t: &super::AppTarget) -> Result<stream::WindowInfo, String> {
@@ -135,8 +247,16 @@ impl Capturer {
         let display = super::display();
         let (source, geometry, window) = match super::app_target() {
             Some(t) => {
-                let w = wait_for_window(&t)?;
-                let crop = super::crop_for(&t, &w);
+                let mut w = wait_for_window(&t)?;
+                let hub = w.bundle == super::sim::DEVICE_HUB;
+                if hub && t.screen_only && super::sim::prepare_hub(w.pid, &w.frame) {
+                    w = wait_for_window(&t)?;
+                }
+                let crop = if hub && t.screen_only {
+                    detect_device_rect(&w).unwrap_or(w.frame)
+                } else {
+                    super::crop_for(&t, &w)
+                };
                 let (width, _) = super::size_for(crop.size.width, crop.size.height);
                 let g = Geometry {
                     display: super::display_of(&w.frame).unwrap_or(display),
@@ -347,6 +467,10 @@ impl Capturer {
             self.changes.push((x0, y0, x1, y1));
             self.damaged = true;
             self.damaged_at.get_or_insert_with(Instant::now);
+        }
+        if self.window.is_some() && super::sim::take_recrop() {
+            log::info!("device changed shape; finding it again");
+            self.rebuild = true;
         }
         if let Some(id) = self.window {
             // The window moves (input has to follow it), resizes or closes.

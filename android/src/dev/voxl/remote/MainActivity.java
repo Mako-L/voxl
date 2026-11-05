@@ -45,40 +45,34 @@ public class MainActivity extends Activity {
     /** When voxl last stopped being the app in front (uptime ms). */
     static long leftAt = -1_000_000;
 
-    /** Null until the hinge sensor reports; then whether the phone is folded shut. */
-    private Boolean folded;
-    private boolean lockedByFold;
+    /** The hinge posture last sent: "closed", "half" or "open" (null before the first). */
+    private String posture;
 
     /**
-     * The Fold's hinge angle: about 0 degrees shut, 180 open. Closing the phone is
-     * seen while the app is still on screen; reopening is seen when the app comes
-     * back (registering an on-change sensor reports its current value).
+     * The Fold's hinge angle: about 0 degrees shut, 180 flat open. It's sent as a
+     * posture: the iPhone Duo simulator folds the same way, any other iPhone locks
+     * when shut and wakes when opened (the server decides). Closing is seen while the
+     * app is still on screen; reopening when it comes back (registering an on-change
+     * sensor reports its current value).
      */
     private final SensorEventListener hinge = new SensorEventListener() {
         @Override public void onSensorChanged(SensorEvent e) {
             float angle = e.values[0];
-            // Hysteresis: a half-open phone (laptop posture) changes nothing.
-            if (angle < 30) setFolded(true, angle);
-            else if (angle > 120) setFolded(false, angle);
+            // Hysteresis around each boundary, so a hand-held hinge doesn't flicker.
+            String next = posture;
+            if (angle < 25) next = "closed";
+            else if (angle > 160) next = "open";
+            else if (angle > 40 && angle < 145) next = "half";
+            if (next == null || next.equals(posture)) return;
+            boolean first = posture == null;
+            posture = next;
+            Log.i("voxl", "hinge " + angle + " -> " + next);
+            // At launch, only a phone that isn't simply open says anything.
+            if (first && next.equals("open")) return;
+            device("posture-" + next);
         }
         @Override public void onAccuracyChanged(Sensor s, int a) {}
     };
-
-    private void setFolded(boolean now, float angle) {
-        if (folded != null && folded == now) return;
-        boolean first = folded == null;
-        folded = now;
-        Log.i("voxl", "hinge " + angle + " folded=" + now + " lockedByFold=" + lockedByFold);
-        if (first && !now) return;
-        if (now) {
-            device("lock");
-            lockedByFold = true;
-        } else if (lockedByFold) {
-            // The iPhone's side button toggles: a second press wakes it.
-            device("lock");
-            lockedByFold = false;
-        }
-    }
 
     void device(String action) {
         web.evaluateJavascript("window.voxlDevice && window.voxlDevice('" + action + "')", null);
