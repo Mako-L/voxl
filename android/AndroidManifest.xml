@@ -5,6 +5,13 @@
     android:versionName="0.1">
     <uses-sdk android:minSdkVersion="30" android:targetSdkVersion="36" />
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- To find the launcher to hand Home over to outside voxl. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.HOME" />
+        </intent>
+    </queries>
     <application
         android:label="voxl"
         android:theme="@android:style/Theme.DeviceDefault.NoActionBar"
@@ -26,6 +33,22 @@
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:scheme="https" />
+            </intent-filter>
+        </activity>
+        <!-- Set as the phone's Home app, the Home button/gesture comes here: just after
+             voxl was in front it presses the iPhone's Home and brings voxl back;
+             anywhere else it goes on to the usual launcher. Shows nothing itself. -->
+        <activity
+            android:name=".HomeActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:launchMode="singleInstance"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.HOME" />
+                <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
     </application>

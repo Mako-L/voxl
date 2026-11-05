@@ -345,6 +345,18 @@ adb shell am start -n dev.voxl.remote/.MainActivity -d 'https://host:port/?token
 
 Without `-d` it asks for the link on first launch and remembers it.
 
+To have the phone's **Home** button or gesture press the iPhone's Home instead of
+leaving voxl, make voxl the phone's Home app; Home anywhere else still goes to your
+usual launcher (an installed one like Nova is preferred over the built-in one):
+
+```sh
+adb shell cmd package set-home-activity dev.voxl.remote/.HomeActivity
+# undo, e.g. back to Nova:
+adb shell cmd package set-home-activity com.teslacoilsw.launcher/.NovaLauncher
+```
+
+(Or Settings → Apps → Default apps → Home app.)
+
 ## FAQ
 
 **Why a WebSocket and not WebRTC?** One WebSocket goes wherever a web page does: through

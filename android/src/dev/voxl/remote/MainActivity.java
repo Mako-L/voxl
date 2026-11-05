@@ -38,6 +38,13 @@ public class MainActivity extends Activity {
     private WebView web;
     private long lastKey;
     private SensorManager sensors;
+    /** The running screen, for HomeActivity. */
+    static MainActivity current;
+    /** Resumed: voxl is the app in front. */
+    static boolean resumed;
+    /** When voxl last stopped being the app in front (uptime ms). */
+    static long leftAt = -1_000_000;
+
     /** Null until the hinge sensor reports; then whether the phone is folded shut. */
     private Boolean folded;
     private boolean lockedByFold;
@@ -73,7 +80,7 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void device(String action) {
+    void device(String action) {
         web.evaluateJavascript("window.voxlDevice && window.voxlDevice('" + action + "')", null);
     }
 
@@ -95,9 +102,17 @@ public class MainActivity extends Activity {
         setContentView(web);
         immersive();
         sensors = getSystemService(SensorManager.class);
+        current = this;
         String url = urlFrom(getIntent());
         if (url != null) web.loadUrl(url);
         else askForUrl();
+    }
+
+    @Override
+    protected void onPause() {
+        if (resumed) leftAt = android.os.SystemClock.uptimeMillis();
+        resumed = false;
+        super.onPause();
     }
 
     @Override
@@ -176,6 +191,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        resumed = true;
         Sensor h = sensors.getDefaultSensor(Sensor.TYPE_HINGE_ANGLE);
         if (h != null) {
             sensors.unregisterListener(hinge);
@@ -186,6 +202,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         sensors.unregisterListener(hinge);
+        if (current == this) current = null;
         super.onDestroy();
     }
 
